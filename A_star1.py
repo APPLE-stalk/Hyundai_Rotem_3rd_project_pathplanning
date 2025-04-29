@@ -56,7 +56,6 @@ for v in voxels:
     occ[i, j, k] = 1
 
 
-
 origin = (0, 0, 0)
 nx, ny, nz = dims
 # 1) UniformGrid 세팅
