@@ -2,121 +2,15 @@ import numpy as np
 import open3d as o3d
 import heapq
 import pyvista as pv
-# point cloud ply파일 불러오기 파일 불러오기
-pcd = o3d.io.read_point_cloud("./downsampling_outliner_point_cloud_(100_100)_1.0.ply")
 
-# point cloud 시각화
-# o3d.visualization.draw_geometries([pcd])
-
-# point to voxel로 변환 무지개
-# voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=0.5)
-
-voxel_size = 2.0  # 원하는 voxel 크기 지정 (단위: meter)
-voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=voxel_size)
-
-# voxel 시각화
-# o3d.visualization.draw_geometries([voxel_grid])
-# voxel_grid.origin: 시작점 [x0,y0,z0], voxel_grid.voxel_size: 크기
-
-
-
-
-
-
-###############################
-x_s = 60 # 시작 점
-y_s = 10
-z_s = 27.23
-
-x_g = 90 # 목표 점
-y_g = 60
-z_g = 80
-
-
-
-
-
-
-
-
-
-
-voxels = voxel_grid.get_voxels()  # Open3D 0.15+
-
-#-디버깅-#
-print('lllllllll', len(voxels)) # 2944개
-print(voxels[0:6])
-print(type(voxels))
-print(voxels[0].grid_index, voxels[0].color)
-#----#
-
-# 1-1) 맵 크기 계산 (셀 수)
-#    각 voxel.grid_index 는 (i,j,k) 정수 인덱스
-indices = np.array([v.grid_index for v in voxels])
-min_idx = indices.min(axis=0)
-max_idx = indices.max(axis=0) + 1
-print('mmm', min_idx)
-print('mmm', max_idx)
-dims = (max_idx - min_idx).astype(int)  # (nx, ny, nz)
-
-# 1-2) Occupancy 배열 (0=free, 1=occupied)
-occ = np.zeros(dims, dtype=np.uint8)
-for v in voxels:
-    i, j, k = np.array(v.grid_index) - min_idx
-    occ[i, j, k] = 1
-
-
-origin = (0, 0, 0)
-nx, ny, nz = dims
-# 1) UniformGrid 세팅
-# 1) ImageData (UniformGrid 대체) 생성
-grid = pv.ImageData(
-    dimensions=(nx+1, ny+1, nz+1),           # 셀 단위로 사용할 땐 +1
-    spacing=(voxel_size,)*3,                 # 각 축 voxel 크기
-    origin=tuple(origin)                     # 맵의 원점
-)
-
-# 2) 셀 데이터로 Occupancy 정보 붙이기
-#    Cell data를 쓰려면 dimensions = 셀수+1
-grid.cell_data["occ"] = occ.ravel(order="F")  # Fortran order flatten
-
-# 3) threshold로 장애물(occ>0.5)만 추출
-voxels = grid.threshold(0.5, scalars="occ")
-
-# 4) Plotter로 인터랙티브 시각화
-plotter = pv.Plotter()
-plotter.add_mesh(
-    voxels,
-    color="tomato",
-    opacity=0.8,
-    show_edges=False
-)
-plotter.show_grid()
-plotter.show(title="3D Occupancy Grid")
-
-
-
-# 맵 정보를 전역 좌표계로 변환할 때는:
-# world_coord = origin + (idx + 0.5) * voxel_size
-
-# --- 2. 3D A* 경로 계획 예제 --------------------------
-
-# 2-1) 이웃 후보 (6-연결)
-neighbor_offsets = np.array([
-    [ 1,  0,  0],
-    [-1,  0,  0],
-    [ 0,  1,  0],
-    [ 0, -1,  0],
-    [ 0,  0,  1],
-    [ 0,  0, -1],
-], dtype=int)
 
 def heuristic(a, b):
     # Euclidean 거리
     return np.linalg.norm(np.array(a) - np.array(b))
+
 def astar_2d(occ2d, start, goal):
     nx, ny = occ2d.shape
-    neigh = [(1,0),(-1,0),(0,1),(0,-1)]
+    neigh = [(1,0),(-1,0),(0,1),(0,-1), (1, 1), (-1, 1), (-1, -1), (1, -1)]
     def h(a,b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
     open_set = [(h(start,goal), 0, start, None)]
     came, gscore = {}, {start:0}
@@ -137,6 +31,158 @@ def astar_2d(occ2d, start, goal):
                 gscore[nb] = ng
                 heapq.heappush(open_set, (ng+h(nb,goal), ng, nb, cur))
     return []
+
+
+
+# point cloud 파일(.ply) 불러오기 파일 불러오기
+# 100m*100m 사이즈, 1.0m*1.0m단위로 down sampling 한 맵으로 성공하였음 "./downsampling_outliner_point_cloud_(100_100)_1.0.ply"
+pcd = o3d.io.read_point_cloud("./downsampling_outliner_point_cloud_(100_100)_1.0.ply")
+
+# point cloud 시각화
+# o3d.visualization.draw_geometries([pcd])
+
+# point -> voxel로 변환
+voxel_size = 2.0  # 원하는 voxel 크기 지정 (단위: meter)
+voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=voxel_size)
+
+# voxel 시각화
+# 검은색으로 나옴. open3d 특성상 어쩔 수 없는 듯
+# o3d.visualization.draw_geometries([voxel_grid])
+
+
+
+
+x_s = 60 # 시작 점
+y_s = 10
+z_s = 27.23
+
+x_g = 90 # 목표 점
+y_g = 60
+z_g = 80
+
+
+voxels = voxel_grid.get_voxels()
+print('voxel 갯수: ', len(voxels)) # 2944개
+print('voxel 1개 예시: ', voxels[0])
+print('voxel 좌표', voxels[0].grid_index, 'voxel 색상', voxels[0].color) # voxel 데이터 접근 방법: 
+
+
+# 맵 크기 계산 (셀 수)
+# 각 voxel.grid_index 는 (i,j,k) 정수 인덱스
+indices = np.array([v.grid_index for v in voxels])
+min_idx = indices.min(axis=0) # axis=0의미: 같은 열끼리 비교하여 min값을 구하시오
+max_idx = indices.max(axis=0) + 1 # 슬라이싱 할 때 마지막 인덱시 미포함 고려하여 +1씩 해주기
+dims = (max_idx - min_idx).astype(int)  # (nx, ny, nz) 각 축별 길이값 구하기
+nx, ny, nz = dims
+
+
+# Occupancy 배열 (0=free, 1=occupied)
+# 0==free => 갈 수 있음 // 1==occupied => 갈 수 없음
+occ = np.zeros(dims, dtype=np.uint8)
+for v in voxels:
+    i, j, k = np.array(v.grid_index) - min_idx
+    occ[i, j, k] = 1
+
+
+
+# Occupied Grid Map 시각화
+# ImageData 생성
+origin = min_idx
+grid = pv.ImageData(
+    dimensions=(nx+1, ny+1, nz+1), # 셀 단위로 사용할 땐 +1
+    spacing=(voxel_size,)*3,       # 각 축 voxel 크기
+    origin=tuple(origin)           # 맵의 원점
+)
+
+# 1D로 펼쳐서 grid 객체에 추가하기 
+grid.cell_data["occ"] = occ.ravel(order="F") # order="F": 평탄화
+
+# grid객체 중 장애물(occ>0.5)
+voxels = grid.threshold(0.5, scalars="occ") # occ값이 임계값 0.5 이상(1인 voxel만)인 것들만 추려서 voxels에 담음
+
+# Plotter로 인터랙티브 시각화
+plotter = pv.Plotter()
+plotter.add_mesh(
+    voxels,
+    color="lightgray",
+    opacity=0.8,
+    show_edges=False
+)
+plotter.show_grid()
+plotter.show(title="3D Occupancy Grid")
+plotter.close() 
+
+# 맵 정보를 전역 좌표계로 변환할 때는:
+# world_coord = origin + (idx + 0.5) * voxel_size
+
+
+# 시작/목표 월드 좌표 → 그리드 인덱스로 변환
+start_world = np.array([x_s, y_s, z_s])
+goal_world  = np.array([x_g, y_g, z_g])
+start_idx = tuple(((start_world - voxel_grid.origin) / voxel_size - min_idx).astype(int))
+goal_idx  = tuple(((goal_world  - voxel_grid.origin) / voxel_size - min_idx).astype(int))
+
+
+# 사용할 z 레벨 선택
+k0 = 1  # 0 또는 1
+# 2D occupancy slice
+occ2d   = occ[:, :, k0]        # shape = (51,51)
+start2d = start_idx[:2]        # (i_s, j_s)
+goal2d  = goal_idx[:2]         # (i_g, j_g)
+
+# 실행
+path2d = astar_2d(occ2d, start2d, goal2d)
+if path2d:
+    print('2D 경로 찾음')
+    # print("2D 경로 인덱스:", path2d)
+else:
+    print("2D에서도 경로를 찾지 못했습니다.")
+
+
+# 3d맵 위에 2d path 그리기
+path_mask = np.zeros_like(occ, dtype=np.uint8)
+for (i, j) in path2d:
+    path_mask[i, j, k0] = 1
+grid.cell_data["path"] = path_mask.ravel(order="F")
+path_voxels = grid.threshold(0.5, scalars="path")
+
+plotter = pv.Plotter() 
+plotter.add_mesh(voxels,      color="lightgray", opacity=0.6) 
+plotter.add_mesh(path_voxels, color="yellow",     opacity=1.0)
+plotter.show_grid()
+plotter.show(title="3D Occupancy + 2D Path")
+plotter.close()
+
+
+
+# # 2-3) A* 호출
+# path_idx = astar_3d(occ, start_idx, goal_idx)
+# if not path_idx:
+#     print("경로를 찾지 못했습니다.")
+# else:
+#     # 인덱스 경로 → 월드 좌표 경로
+#     path_world = [
+#         voxel_grid.origin + (np.array(idx) + min_idx + 0.5) * voxel_size
+#         for idx in path_idx
+#     ]
+#     print("월드 좌표 경로:", path_world)
+
+
+
+
+# --- 2. 3D A* 경로 계획 예제 --------------------------
+
+# 2-1) 이웃 후보 (6-연결)
+neighbor_offsets = np.array([
+    [ 1,  0,  0],
+    [-1,  0,  0],
+    [ 0,  1,  0],
+    [ 0, -1,  0],
+    [ 0,  0,  1],
+    [ 0,  0, -1],
+], dtype=int)
+
+
 
 
 def astar_3d(occ, start, goal):
@@ -185,73 +231,3 @@ def astar_3d(occ, start, goal):
                 f_score = tentative_g + heuristic(nb, goal)
                 heapq.heappush(open_set, (f_score, tentative_g, nb, current))
     return []  # 경로 없음
-
-
-
-# 2-2) 예시: 시작/목표 월드 좌표 → 그리드 인덱스로 변환
-start_world = np.array([x_s, y_s, z_s])
-goal_world  = np.array([x_g, y_g, z_g])
-start_idx = tuple(((start_world - voxel_grid.origin) / voxel_size - min_idx).astype(int))
-goal_idx  = tuple(((goal_world  - voxel_grid.origin) / voxel_size - min_idx).astype(int))
-
-
-# 1) 사용할 z 레벨 선택: (start_idx[2] 혹은 goal_idx[2]가 유효한 값)
-k0 = 1  # 0 또는 1
-# 2) 2D occupancy slice
-occ2d   = occ[:, :, k0]        # shape = (51,51)
-start2d = start_idx[:2]        # (i_s, j_s)
-goal2d  = goal_idx[:2]         # (i_g, j_g)
-
-# 4) 실행
-path2d = astar_2d(occ2d, start2d, goal2d)
-if path2d:
-    print("2D 경로 인덱스:", path2d)
-else:
-    print("2D에서도 경로를 찾지 못했습니다.")
-    
-
-# # 2-3) A* 호출
-# path_idx = astar_3d(occ, start_idx, goal_idx)
-# if not path_idx:
-#     print("경로를 찾지 못했습니다.")
-# else:
-#     # 인덱스 경로 → 월드 좌표 경로
-#     path_world = [
-#         voxel_grid.origin + (np.array(idx) + min_idx + 0.5) * voxel_size
-#         for idx in path_idx
-#     ]
-#     print("월드 좌표 경로:", path_world)
-
-# --- 디버깅 코드 시작 ---
-print("dims:", dims)
-print("min_idx:", min_idx)
-print("origin:", voxel_grid.origin)
-print("voxel_size:", voxel_size)
-
-# start, goal 인덱스가 올바르게 계산됐는지
-print("start_idx:", start_idx)
-print("goal_idx: ", goal_idx)
-
-# 인덱스 유효 범위 확인
-nx, ny, nz = occ.shape
-for name, idx in [("start", start_idx), ("goal", goal_idx)]:
-    i,j,k = idx
-    valid = (0 <= i < nx) and (0 <= j < ny) and (0 <= k < nz)
-    print(f"{name}_valid_range:", valid)
-    if valid:
-        print(f"occ at {name}_idx:", occ[i, j, k])
-
-
-
-# 3d맵 위에 2d path 그리기
-path_mask = np.zeros_like(occ, dtype=np.uint8)
-for (i, j) in path2d:
-    path_mask[i, j, k0] = 1
-grid.cell_data["path"] = path_mask.ravel(order="F")
-path_voxels = grid.threshold(0.5, scalars="path")
-
-p = pv.Plotter()
-p.add_mesh(voxels,      color="lightgray", opacity=0.6)
-p.add_mesh(path_voxels, color="yellow",     opacity=1.0)
-p.show_grid()
-p.show(title="Occupancy + Path")
