@@ -2,7 +2,7 @@ import numpy as np
 import open3d as o3d
 import heapq
 import pyvista as pv
-
+from scipy.ndimage import binary_dilation # 장애물 마진 용
 
 def heuristic(a, b):
     # Euclidean 거리
@@ -130,8 +130,20 @@ occ2d   = occ[:, :, k0]        # shape = (51,51)
 start2d = start_idx[:2]        # (i_s, j_s)
 goal2d  = goal_idx[:2]         # (i_g, j_g)
 
+# 2D 벽 마진 두기
+tank_radius = 2.0       # 전차 반경 (m), 전장: 10.8, 차체: 7.5, 전폭: 3.6, 전고: 2.4
+voxel_size   = 2.0       # 셀 크기 (m)
+n_margin     = int(np.ceil(tank_radius / voxel_size))
+
+# 2D용: 정사각 커널
+struct2d = np.ones((2*n_margin+1, 2*n_margin+1), dtype=bool)
+
+# -- 2D slice에만 마진 적용 --
+occ2d_inflated = binary_dilation(occ2d, structure=struct2d)
+
 # 실행
-path2d = astar_2d(occ2d, start2d, goal2d)
+# path2d = astar_2d(occ2d, start2d, goal2d)
+path2d = astar_2d(occ2d_inflated, start2d, goal2d) # 장애물 마진 넣기
 if path2d:
     print('2D 경로 찾음')
     # print("2D 경로 인덱스:", path2d)
@@ -167,9 +179,11 @@ plotter.close()
 #     ]
 #     print("월드 좌표 경로:", path_world)
 
-
-
-
+# 3D용: 정육면체 커널
+# struct3d = np.ones((2*n_margin+1, 2*n_margin+1, 2*n_margin+1), dtype=bool)
+# -- 전체 3D grid에 적용하고 싶다면 --
+# occ_inflated = binary_dilation(occ, structure=struct3d)
+# occ = occ_inflated.astype(np.uint8)
 # --- 2. 3D A* 경로 계획 예제 --------------------------
 
 # 2-1) 이웃 후보 (6-연결)
