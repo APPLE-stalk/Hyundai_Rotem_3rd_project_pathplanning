@@ -3,6 +3,7 @@ import open3d as o3d
 import heapq
 import pyvista as pv
 from scipy.ndimage import binary_dilation # 장애물 마진 용
+import json # 구한 path 저장
 
 def heuristic(a, b):
     # Euclidean 거리
@@ -83,7 +84,8 @@ for v in voxels:
     i, j, k = np.array(v.grid_index) - min_idx
     occ[i, j, k] = 1
 
-
+# OCC맵 저장
+np.save("voxel_2by2.npy", occ)         # .npy 형식으로 저장
 
 # Occupied Grid Map 시각화
 # ImageData 생성
@@ -147,6 +149,9 @@ path2d = astar_2d(occ2d_inflated, start2d, goal2d) # 장애물 마진 넣기
 if path2d:
     print('2D 경로 찾음')
     # print("2D 경로 인덱스:", path2d)
+    # 패스 저장
+    path_arr = np.array(path2d, dtype=int)  # shape = (N, 2)
+    np.save("path2d.npy", path_arr)
 else:
     print("2D에서도 경로를 찾지 못했습니다.")
 
