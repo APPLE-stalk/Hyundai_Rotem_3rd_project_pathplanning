@@ -3,7 +3,6 @@ import open3d as o3d
 import heapq
 import pyvista as pv
 from scipy.ndimage import binary_dilation # 장애물 마진 용
-import json # 구한 path 저장
 
 def heuristic(a, b):
     # Euclidean 거리
@@ -149,9 +148,19 @@ path2d = astar_2d(occ2d_inflated, start2d, goal2d) # 장애물 마진 넣기
 if path2d:
     print('2D 경로 찾음')
     # print("2D 경로 인덱스:", path2d)
-    # 패스 저장
+    
     path_arr = np.array(path2d, dtype=int)  # shape = (N, 2)
-    np.save("path2d.npy", path_arr)
+    # 패스 저장(.npy 방식)
+    # np.save("path2d.npy", path_arr)
+    # 패스 저장(.csv 방식)
+    np.savetxt(
+    "path2d.csv",
+    path_arr,
+    delimiter=",",
+    fmt="%d",
+    header="i,j",
+    comments=""       # header 라인 앞에 '#' 가 붙지 않도록
+)
 else:
     print("2D에서도 경로를 찾지 못했습니다.")
 
