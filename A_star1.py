@@ -84,7 +84,7 @@ for v in voxels:
     occ[i, j, k] = 1
 
 # OCC맵 저장
-np.save("voxel_2by2.npy", occ)         # .npy 형식으로 저장
+np.save("OGM_2by2.npy", occ)         # .npy 형식으로 저장
 
 # Occupied Grid Map 시각화
 # ImageData 생성
