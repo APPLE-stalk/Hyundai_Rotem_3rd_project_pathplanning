@@ -33,7 +33,149 @@ def astar_2d(occ2d, start, goal):
                 heapq.heappush(open_set, (ng+h(nb,goal), ng, nb, cur))
     return []
 
+# 2D path 시각화
+def plot_2d_data(data: np.ndarray):
+    """
+    data: shape = (N, 2) 배열
+    1열 → x, 2열 → y로 간주하고 산점도로 시각화
+    """
+    x = data[:, 0]
+    y = data[:, 1]
 
+    plt.figure(figsize=(6, 6))
+    plt.scatter(x, y,
+                s=20,          # 점 크기
+                alpha=0.7,     # 투명도
+                edgecolor='k', # 윤곽선
+                label='samples')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.title('Scatter Plot of Shape (N, 2) Data')
+    plt.grid(True)
+    plt.axis('equal')    # x, y 스케일 동일비율
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+    plotter.close()  # 명시적으로 닫아 줍니다
+
+# 3D path 시각화
+def plot_3d_data(data: np.ndarray):
+    x = data[:, 0]
+    z = data[:, 1]
+    y = data[:, 2]
+
+    fig = plt.figure(figsize=(6, 6))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(x, z, y,
+            s=20,          # 점 크기
+            alpha=0.7,     # 투명도
+            edgecolor='k', # 윤곽선
+            label='samples')
+    
+    ax.set_xlabel('X')
+    ax.set_ylabel('Z')
+    ax.set_zlabel('Y')
+    ax.set_title('3D Scatter Plot of Shape (N, 3) Data')
+    ax.legend()
+
+    # 3D 축 동일 비율 설정
+    # max_range = np.max([x.max() - x.min(), z.max() - z.min(), y.max() - y.min()])
+    # mid_x = (x.max() + x.min()) * 0.5
+    # mid_z = (z.max() + z.min()) * 0.5
+    # mid_y = (y.max() + y.min()) * 0.5
+    # ax.set_xlim(mid_x - max_range/2, mid_x + max_range/2)
+    # ax.set_zlim(mid_z - max_range/2, mid_z + max_range/2)
+    # ax.set_ylim(mid_y - max_range/2, mid_y + max_range/2)
+    
+
+    plt.tight_layout()
+    plt.show()
+    plotter.close()  # 명시적으로 닫아 줍니다
+
+
+# 등간격(유클리디안) 선형 보간
+import numpy as np
+
+def resample_by_arc_length_2d(data: np.ndarray,
+                        spacing: float,
+                        include_endpoint: bool = True
+                        ) -> np.ndarray:
+    """
+    2D 폴리라인을 아크 길이에 따라 일정 간격으로 재샘플링합니다.
+
+    Parameters
+    ----------
+    data : np.ndarray, shape (N,2)
+        원본 폴리라인 점들 (x, y).
+    spacing : float
+        재샘플링 간격 (아크 길이 기준). 0 < spacing <= 전체 길이.
+    include_endpoint : bool, default True
+        True면 마지막 점(총 길이)을 반드시 포함합니다.
+
+    Returns
+    -------
+    np.ndarray, shape (M,2)
+        아크 길이 방향으로 spacing 간격 보간된 (x, y) 점들.
+    """
+    if spacing <= 0:
+        raise ValueError("spacing은 0보다 커야 합니다.")
+    
+    # 1) x,y 추출 및 세그먼트 길이 계산
+    x_old, y_old = data[:,0], data[:,1]
+    dx = np.diff(x_old)
+    dy = np.diff(y_old)
+    seg_len = np.hypot(dx, dy)              # 각 구간 길이
+    s_old = np.concatenate(([0], np.cumsum(seg_len)))
+    total_len = s_old[-1]
+
+    if spacing > total_len:
+        # 간격이 너무 크면 시작/끝 두 점만 반환
+        return np.array([[x_old[0], y_old[0]], [x_old[-1], y_old[-1]]])
+
+    # 2) 새로 뽑을 s 위치 생성
+    s_new = np.arange(0, total_len, spacing)
+    if include_endpoint and s_new[-1] < total_len:
+        s_new = np.append(s_new, total_len)
+
+    # 3) s → x, y 선형 보간
+    x_new = np.interp(s_new, s_old, x_old)
+    y_new = np.interp(s_new, s_old, y_old)
+
+    return np.vstack((x_new, y_new)).T
+
+def resample_by_arc_length_3d(data: np.ndarray,
+                            spacing: float,
+                            include_endpoint: bool = True) -> np.ndarray:
+
+    if spacing <= 0:
+        raise ValueError("spacing은 0보다 커야 합니다.")
+    
+    # 좌표 분리
+    x_old, y_old, z_old = data[:,0], data[:,1], data[:,2]
+    # 각 구간 길이 계산
+    dx = np.diff(x_old)
+    dy = np.diff(y_old)
+    dz = np.diff(z_old)
+    seg_len = np.sqrt(dx**2 + dy**2 + dz**2)
+    s_old = np.concatenate(([0], np.cumsum(seg_len)))
+    total_len = s_old[-1]
+
+    # spacing이 전체 길이보다 클 경우 시작/끝만 반환
+    if spacing > total_len:
+        return np.array([[x_old[0], y_old[0], z_old[0]],
+                        [x_old[-1], y_old[-1], z_old[-1]]])
+
+    # 새로 뽑을 s 위치 생성
+    s_new = np.arange(0, total_len, spacing)
+    if include_endpoint and s_new[-1] < total_len:
+        s_new = np.append(s_new, total_len)
+
+    # s → x, y, z 선형 보간
+    x_new = np.interp(s_new, s_old, x_old)
+    y_new = np.interp(s_new, s_old, y_old)
+    z_new = np.interp(s_new, s_old, z_old)
+
+    return np.vstack((x_new, y_new, z_new)).T
 
 # ====================== point cloud 파일(.ply) 불러오기 ======================
 # pcd = o3d.io.read_point_cloud("./downsampling_outliner_point_cloud_(100_100)_1.0.ply")
@@ -118,6 +260,7 @@ map_plotter.close()
 
 
 
+
 # ====================== 전처리(2D slicing) ======================
 st_time = time.perf_counter()
 x_s = 60 # 시작 점 [우, 전방, 높이]
@@ -165,6 +308,7 @@ plt.show()
 
 
 
+
 # ====================== 2D 벽 마진 주기(binary_dilation) ======================
 st_time = time.perf_counter()
 
@@ -205,16 +349,21 @@ print(f'A* 소요시간: {ed_time - st_time:.6f}초')
 if path2d:
     print('2D 경로 찾음')
     print("2D 경로 인덱스:", path2d)
-    print(f"Before Linear Interpolation way point 갯수: {len(path2d)} 개")
     
-    path_arr = np.array(path2d, dtype=int)  # shape = (N, 2)
+    path_arr_2d = np.array(path2d, dtype=int)  # shape = (N, 2)
+    
+    # 3D로 확장 위해 y(높이)정보 추가해줌
+    # k0 컬럼 생성
+    k0_col = np.full((path_arr_2d.shape[0], 1), k0, dtype=int)
+    # 수평으로 합쳐서 shape = (N,3) 배열 만들기
+    path_arr_3d = np.hstack((path_arr_2d, k0_col))
 else:
     print("2D에서 경로를 찾지 못했습니다.")
 
 
 # 3d맵 위에 2d path 그리기
 path_mask = np.zeros_like(occ, dtype=np.uint8)
-for (i, j) in path2d:
+for (i, j) in path_arr_2d:
     path_mask[i, j, k0] = 1
 
 sp_mask = np.zeros_like(occ, dtype=np.uint8) # 시작점
@@ -250,11 +399,35 @@ plotter.show(title="3D Occupancy + 2D Path (Start/Goal)")
 plotter.close()
 
 
-    # 패스 저장(.npy 방식)
-    # np.save("path2d.npy", path_arr)
-    # 패스 저장(.csv 방식)
-    # np.savetxt("path2d_LH.csv", path_arr, delimiter=",", fmt="%d", header="x,z", comments="")       # header 라인 앞에 '#' 가 붙지 않도록
-    
+
+# ====================== Linear Interpolation ======================
+## 2d
+print(f"Before Linear Interpolation 2d way point 갯수: {len(path_arr_2d)} 개")
+plot_2d_data(path_arr_2d) # before interpolation 시각화 
+st_time = time.perf_counter()
+interpolated_2d_path_arr = resample_by_arc_length_2d(path_arr_2d, spacing = 0.5)
+ed_time = time.perf_counter()
+print(f'2d Linear Interpolation 소요시간: {ed_time - st_time:.6f}초')
+plot_2d_data(interpolated_2d_path_arr) # after interpolation 시각화 
+print(f"After Linear Interpolation way point 갯수: {len(interpolated_2d_path_arr)} 개")
+
+
+## 3d
+print(f"Before Linear Interpolation 3d way point 갯수: {len(path_arr_3d)} 개")
+plot_3d_data(path_arr_3d) # before interpolation 시각화
+st_time = time.perf_counter()
+interpolated_3d_path_arr = resample_by_arc_length_3d(path_arr_3d, spacing = 0.5)
+ed_time = time.perf_counter()
+print(f'3d Linear Interpolation 소요시간: {ed_time - st_time:.6f}초')
+plot_3d_data(interpolated_3d_path_arr) # after interpolation 시각화
+print(f"After Linear Interpolation way point 갯수: {len(interpolated_3d_path_arr)} 개")
+
+
+
+
+# 패스 저장(.csv 방식)
+np.savetxt('interpolated_path_2d.csv', interpolated_2d_path_arr, delimiter=',', header='x,z', comments='')  # comments='' 로 '#' 주석 제거  
+np.savetxt('interpolated_path_3d.csv', interpolated_3d_path_arr, delimiter=',', header='x,z,y', comments='')  # comments='' 로 '#' 주석 제거  
     
 # # 2-3) A* 호출
 # path_idx = astar_3d(occ, start_idx, goal_idx)
@@ -276,61 +449,61 @@ plotter.close()
 # --- 2. 3D A* 경로 계획 예제 --------------------------
 
 # 2-1) 이웃 후보 (6-연결)
-neighbor_offsets = np.array([
-    [ 1,  0,  0],
-    [-1,  0,  0],
-    [ 0,  1,  0],
-    [ 0, -1,  0],
-    [ 0,  0,  1],
-    [ 0,  0, -1],
-], dtype=int)
+# neighbor_offsets = np.array([
+#     [ 1,  0,  0],
+#     [-1,  0,  0],
+#     [ 0,  1,  0],
+#     [ 0, -1,  0],
+#     [ 0,  0,  1],
+#     [ 0,  0, -1],
+# ], dtype=int)
 
 
 
 
-def astar_3d(occ, start, goal):
-    print('ooo', occ[0][0:10], occ[1][0:10], occ[2][0:10],)
-    print('sss', start[0],start[1],start[2],)
-    print('ggg', goal[0], goal[1], goal[2])
-    """
-    occ    : numpy (nx,ny,nz) occupancy grid
-    start  : (i,j,k) 시작 인덱스
-    goal   : (i,j,k) 도착 인덱스
-    return : 인덱스 리스트 경로 혹은 빈 리스트
-    """
-    nx, ny, nz = occ.shape
-    print('nnn', nx, ny, nz)
-    open_set = []
-    heapq.heappush(open_set, (0 + heuristic(start, goal), 0, start, None))
-    came_from = {}
-    g_score = {start: 0}
+# def astar_3d(occ, start, goal):
+#     print('ooo', occ[0][0:10], occ[1][0:10], occ[2][0:10],)
+#     print('sss', start[0],start[1],start[2],)
+#     print('ggg', goal[0], goal[1], goal[2])
+#     """
+#     occ    : numpy (nx,ny,nz) occupancy grid
+#     start  : (i,j,k) 시작 인덱스
+#     goal   : (i,j,k) 도착 인덱스
+#     return : 인덱스 리스트 경로 혹은 빈 리스트
+#     """
+#     nx, ny, nz = occ.shape
+#     print('nnn', nx, ny, nz)
+#     open_set = []
+#     heapq.heappush(open_set, (0 + heuristic(start, goal), 0, start, None))
+#     came_from = {}
+#     g_score = {start: 0}
     
-    while open_set:
-        f, g, current, parent = heapq.heappop(open_set)
-        if current in came_from:
-            continue
-        came_from[current] = parent
+#     while open_set:
+#         f, g, current, parent = heapq.heappop(open_set)
+#         if current in came_from:
+#             continue
+#         came_from[current] = parent
         
-        if current == goal:
-            # 경로 복원
-            path = []
-            node = current
-            while node:
-                path.append(node)
-                node = came_from[node]
-            return path[::-1]
+#         if current == goal:
+#             # 경로 복원
+#             path = []
+#             node = current
+#             while node:
+#                 path.append(node)
+#                 node = came_from[node]
+#             return path[::-1]
         
-        for d in neighbor_offsets:
-            nb = tuple(np.array(current) + d)
-            # 경계 검사
-            if not (0 <= nb[0] < nx and 0 <= nb[1] < ny and 0 <= nb[2] < nz):
-                continue
-            # 충돌 검사
-            if occ[nb]:
-                continue
-            tentative_g = g + 1  # 등간격 가정
-            if tentative_g < g_score.get(nb, np.inf):
-                g_score[nb] = tentative_g
-                f_score = tentative_g + heuristic(nb, goal)
-                heapq.heappush(open_set, (f_score, tentative_g, nb, current))
-    return []  # 경로 없음
+#         for d in neighbor_offsets:
+#             nb = tuple(np.array(current) + d)
+#             # 경계 검사
+#             if not (0 <= nb[0] < nx and 0 <= nb[1] < ny and 0 <= nb[2] < nz):
+#                 continue
+#             # 충돌 검사
+#             if occ[nb]:
+#                 continue
+#             tentative_g = g + 1  # 등간격 가정
+#             if tentative_g < g_score.get(nb, np.inf):
+#                 g_score[nb] = tentative_g
+#                 f_score = tentative_g + heuristic(nb, goal)
+#                 heapq.heappush(open_set, (f_score, tentative_g, nb, current))
+#     return []  # 경로 없음
