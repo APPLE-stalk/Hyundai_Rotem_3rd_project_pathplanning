@@ -35,15 +35,12 @@ def astar_2d(occ2d, start, goal):
 
 # 2D path 시각화
 def plot_2d_data(data: np.ndarray):
-    """
-    data: shape = (N, 2) 배열
-    1열 → x, 2열 → y로 간주하고 산점도로 시각화
-    """
+    data = np.asarray(data)
     x = data[:, 0]
-    y = data[:, 1]
+    z = data[:, 1]
 
     plt.figure(figsize=(6, 6))
-    plt.scatter(x, y,
+    plt.scatter(x, z,
                 s=20,          # 점 크기
                 alpha=0.7,     # 투명도
                 edgecolor='k', # 윤곽선
@@ -60,6 +57,7 @@ def plot_2d_data(data: np.ndarray):
 
 # 3D path 시각화
 def plot_3d_data(data: np.ndarray):
+    data = np.asarray(data)
     x = data[:, 0]
     z = data[:, 1]
     y = data[:, 2]
@@ -100,23 +98,6 @@ def resample_by_arc_length_2d(data: np.ndarray,
                         spacing: float,
                         include_endpoint: bool = True
                         ) -> np.ndarray:
-    """
-    2D 폴리라인을 아크 길이에 따라 일정 간격으로 재샘플링합니다.
-
-    Parameters
-    ----------
-    data : np.ndarray, shape (N,2)
-        원본 폴리라인 점들 (x, y).
-    spacing : float
-        재샘플링 간격 (아크 길이 기준). 0 < spacing <= 전체 길이.
-    include_endpoint : bool, default True
-        True면 마지막 점(총 길이)을 반드시 포함합니다.
-
-    Returns
-    -------
-    np.ndarray, shape (M,2)
-        아크 길이 방향으로 spacing 간격 보간된 (x, y) 점들.
-    """
     if spacing <= 0:
         raise ValueError("spacing은 0보다 커야 합니다.")
     
@@ -177,6 +158,68 @@ def resample_by_arc_length_3d(data: np.ndarray,
 
     return np.vstack((x_new, y_new, z_new)).T
 
+
+from scipy import ndimage
+
+def wall_mask_from_ogm(ogm, voxel_size, grad_thresh):
+    """
+    ogm       : (nx, ny, nz) float or bool ndarray (occupancy probability or binary)
+    voxel_size: 실공간 한 칸 크기 (m)
+    grad_thresh: gradient magnitude 임계값 (단위: occupancy change per m)
+    returns   : bool ndarray, 같은 shape, True인 곳이 “벽” 셀
+    """
+    # 1) 이진화
+    occ = (ogm > 0.5).astype(float)
+
+    # 2) Sobel 미분 (3D)
+    gx = ndimage.sobel(occ, axis=0, mode='nearest') / (8 * voxel_size)
+    gy = ndimage.sobel(occ, axis=1, mode='nearest') / (8 * voxel_size)
+    gz = ndimage.sobel(occ, axis=2, mode='nearest') / (8 * voxel_size)
+
+    # 3) gradient 크기
+    grad = np.sqrt(gx**2 + gy**2 + gz**2)
+
+    # 4) 임계값으로 벽 셀 마스크
+    return grad > grad_thresh
+
+def ogm_to_height_map(ogm, voxel_size, axis=2):
+    """
+    ogm        : (nx, ny, nz) bool ndarray
+    voxel_size : 한 칸 크기 (m)
+    axis       : 높이 축 인덱스 (예: z가 세 번째면 axis=2)
+    returns    : (nx, ny) float ndarray, 높이값(m)
+    """
+    # argmax는 첫 True 인덱스를 반환하니, 없으면 0 높이로 치환
+    occ = ogm.astype(bool)
+    idx_max = np.argmax(occ, axis=axis)
+    # voxel 인덱스를 실제 높이(m)로 변환
+    return idx_max * voxel_size
+
+def slope_mask(H, h, theta_deg):
+    """
+    H         : (nx, nz) float ndarray, 높이맵 (nan 허용)
+    h         : 수평 해상도 (voxel_size, m)
+    theta_deg : 임계 경사각 (°)
+
+    returns   : bool ndarray, True인 곳이 "벽" 또는 경사도가 너무 큰 셀
+    """
+    # 1) nan을 최저 높이값으로 채워서 sobel 처리
+    H_min = np.nanmin(H)
+    H_filled = np.where(np.isnan(H), H_min, H)
+
+    # 2) Sobel 필터로 기울기 계산 (axis=0: x방향, axis=1: z방향)
+    #    sobel 커널의 분모가 8*h인 이유는 Sobel 연산 결과가 픽셀당 차분값을
+    #    4*h 로 나눈 뒤 다시 2로 나눈 형태이기 때문입니다.
+    gx = ndimage.sobel(H_filled, axis=0, mode='nearest') / (8 * h)
+    gz = ndimage.sobel(H_filled, axis=1, mode='nearest') / (8 * h)
+
+    # 3) 기울기 크기로부터 각도 계산
+    slope_rad = np.arctan(np.sqrt(gx**2 + gz**2))
+
+    # 4) 임계 각도 이상인 곳만 True
+    return slope_rad > np.deg2rad(theta_deg)
+
+
 # ====================== point cloud 파일(.ply) 불러오기 ======================
 # pcd = o3d.io.read_point_cloud("./downsampling_outliner_point_cloud_(100_100)_1.0.ply")
 
@@ -219,19 +262,33 @@ def resample_by_arc_length_3d(data: np.ndarray,
 
 # ====================== OGM(.npy) 불러오기 ======================
 st_time = time.perf_counter()
-occ = np.load("OGM_2.0x2.0_LH.npy")
+# ogm= np.load("OGM_2.0x2.0_LH.npy")
+# ogm= np.load("OGM_kd_concept.npy")
+
+
+
+# meta = np.load('OGM_maze1_with_meta.npz')
+meta = np.load('../mapping/3D_LiDAR_fake/open3d/flat_and_hills_whole_25_05_13/flat_and_hills_whole_OGM(0.5_0.5)_with_meta.npz')
+ogm  = meta['data']
+origin     = meta['origin']# + meta['resolution'] * (0, 0, 0.5)
+voxel_size = meta['resolution']
+print(origin)
+print(voxel_size)
+
+
+# origin = (10.5, 12.5, 0.0)
+
 ed_time = time.perf_counter()
 print(f'파일 읽기 소요시간: {ed_time - st_time:.6f}초')
-voxel_size = 2
 
 # PyVista ImageData 생성
-nx, nz, ny = occ.shape # 우, 전방, 높이
-grid = pv.ImageData(
-    dimensions=(nx+1, nz+1, ny+1),
-    spacing=(voxel_size, voxel_size, voxel_size),
-    origin=(0.0, 0.0, 0.0)
+nx, nz, ny = ogm.shape                              # 우, 전방, 높이 #칸수, 칸수*voxel_size가 진짜 길이
+grid = pv.ImageData(                                # PyVista에서 “격자(point) + 셀(cell)” 구조를 만드는 클래스
+    dimensions=(nx+1, nz+1, ny+1),                  # 셀 갯수에 따른 포인트 갯수
+    spacing=(voxel_size, voxel_size, voxel_size),   # 포인트 간격
+    origin=origin                          # 격자의 (0, 0, 0)을 월드 좌표계의 (0, 0, 0)으로 지정
 )
-grid.cell_data["occ"] = occ.ravel(order="F")
+grid.cell_data["occ"] = ogm.ravel(order="F")
 voxels = grid.threshold(0.5, scalars="occ")
 
 
@@ -259,35 +316,102 @@ map_plotter.show(title="3D Occupancy Grid (Loaded)")
 map_plotter.close()
 
 
+# # ====================== 2D Height-Map 만들기 ======================
+# HM = build_top_height_map(voxels, voxel_grid.origin, voxel_size, nx, nz)
+# HM_slope = slope_mask(HM, voxel_size, 31, 7)
+
+
+# import matplotlib.pyplot as plt
+# plt.imshow(HM, origin='lower')   # 배열의 (0,0)을 좌하단에 두려면 origin='lower'
+# plt.colorbar(label='cell value')
+# plt.title('OGM visualized with imshow')
+# plt.xlabel('x index')
+# plt.ylabel('z index')
+# plt.show()
+
+# plt.imshow(HM_slope, origin='lower')   # 배열의 (0,0)을 좌하단에 두려면 origin='lower'
+# plt.colorbar(label='cell value')
+# plt.title('slope')
+# plt.xlabel('x index')
+# plt.ylabel('z index')
+# plt.show()
+
+# 2D 높이맵 생성
+H = ogm_to_height_map(ogm, voxel_size=0.5, axis=2)
+
+# 기존 slope_mask 사용 예
+wall_mask_2d = slope_mask(H, h=0.5, theta_deg=30)
+
+# 3) 시각화
+plt.figure(figsize=(12, 5))
+
+# 높이 맵 시각화
+plt.subplot(1, 2, 1)
+plt.imshow(H.T, origin='lower', interpolation='nearest')
+plt.title('Height Map')
+plt.xlabel('X index')
+plt.ylabel('Z index')
+plt.colorbar(label='Height (m)')
+
+# 벽 마스크 시각화
+plt.subplot(1, 2, 2)
+plt.imshow(wall_mask_2d.T, origin='lower', interpolation='nearest')
+plt.title(f'Wall Mask (>{45}°)')
+plt.xlabel('X index')
+plt.ylabel('Z index')
+plt.colorbar(label='Wall Mask (True=Wall)')
+
+plt.tight_layout()
+plt.show()
 
 
 # ====================== 전처리(2D slicing) ======================
 st_time = time.perf_counter()
+# x_s = 45 # 시작 점 [우, 전방, 높이]
+# z_s = 27
+# y_s = 10
+
+# x_g = 90 # 목표 점 [우, 전방, 높이]
+# z_g = 80
+# y_g = 10
+
+# x_s = 11.5 # 시작 점 [우, 전방, 높이]
+# z_s = 13.5
+# y_s = 0
+
+# x_g = 16.5 # 목표 점 [우, 전방, 높이]
+# z_g = 19.5
+# y_g = 0
+
 x_s = 60 # 시작 점 [우, 전방, 높이]
-z_s = 28
-y_s = 10
+z_s = 27
+y_s = 8
 
-
-x_g = 90 # 목표 점 [우, 전방, 높이]
-z_g = 80
-y_g = 60
+# x_g = 145 # 목표 점 [우, 전방, 높이]
+# z_g = 110
+# y_g = 8
+x_g = 280 # 목표 점 [우, 전방, 높이]
+z_g = 280
+y_g = 8
 
 
 # 시작/목표 월드 좌표 → 그리드 인덱스로 변환
 start_world = np.array([x_s, z_s, y_s])
 goal_world  = np.array([x_g, z_g, y_g])
-start_idx = tuple(((start_world - 0) / voxel_size - 0).astype(int))
-goal_idx  = tuple(((goal_world  - 0) / voxel_size - 0).astype(int))
+start_idx = tuple(((start_world - origin) / voxel_size).astype(int)) # 월드좌표(m) -> 셀 인덱스(칸)
+goal_idx  = tuple(((goal_world  - origin) / voxel_size).astype(int))
 
 
 # 사용할 z 레벨 선택
-k0 = 1  # 0 또는 1
-print("before slicing shape: ", np.shape(occ))
+# k0 = 5  # 0 또는 1
+k0 = 15
+print("before slicing shape: ", np.shape(ogm))
 
 # LH 좌표계 map 
-occ2d = occ[:, :, k0]                   # 우, 전방, 높이
-print("after slicing shape: ", np.shape(occ))
-start2d = (start_idx[0], start_idx[1])  # 우, 전방
+# ogm2d = ogm[:, :, k0]                   # 우, 전방, 높이
+ogm2d = wall_mask_2d
+print("after slicing shape: ", np.shape(ogm2d)) # 우, 전방
+start2d = (start_idx[0], start_idx[1])  # 우, 전방 (인덱스 단위)
 goal2d  = (goal_idx[0],  goal_idx[1])
 ed_time = time.perf_counter()
 print(f'slicing 소요시간: {ed_time - st_time:.6f}초')
@@ -295,14 +419,19 @@ print(f'slicing 소요시간: {ed_time - st_time:.6f}초')
 
 
 # ====================== binary_dilation 이전 시각화 ======================
+Nx, Nz = ogm2d.shape # 우, 전방
+# extent = [0, Nx * voxel_size,     # x축: 0m ~ Nx*voxel_size m
+#           0, Nz * voxel_size]     # z축: 0m ~ Nz*voxel_size m
+
 plt.figure(figsize=(6,6))
-plt.imshow(occ2d.T,         # 전방(y) 축이 위로 오도록 전치
-        origin='lower',  # 원점이 왼쪽 아래
-        cmap='gray_r')   # 0→흰색(free), 1→검은색(occupied)
+plt.imshow(ogm2d.T,                 # 전방(y) 축이 위로 오도록 전치
+        origin='lower',             # 원점이 왼쪽 아래
+        cmap='gray_r')              # 0→흰색(free), 1→검은색(occupied)
+        # extent=extent)            # 축 단위 m 단위로 변경            
 plt.colorbar(label='Occupancy')
 plt.xlabel('X index')
 plt.ylabel('Z index')
-plt.title(f'before binary_dilation')
+plt.title('before binary_dilation')
 plt.grid(False)
 plt.show()
 
@@ -312,15 +441,15 @@ plt.show()
 # ====================== 2D 벽 마진 주기(binary_dilation) ======================
 st_time = time.perf_counter()
 
-tank_radius = 2.0       # 전차 반경 (m), 전장: 10.8, 차체: 7.5, 전폭: 3.6, 전고: 2.4
-voxel_size   = 2.0       # 셀 크기 (m)
-n_margin     = int(np.ceil(tank_radius / voxel_size))
+tank_radius = 3.0       # 전차 반경 (m), 전장: 10.8, 차체: 7.5, 전폭: 3.6, 전고: 2.4
+# voxel_size  = 2.0       # 셀 크기 (m)
+n_margin    = int(np.ceil(tank_radius / voxel_size))
 
 # 2D용: 정사각 커널
 struct2d = np.ones((2*n_margin+1, 2*n_margin+1), dtype=bool)
 
 # 2D slice에만 마진 적용
-occ2d_inflated = binary_dilation(occ2d, structure=struct2d)
+occ2d_inflated = binary_dilation(ogm2d, structure=struct2d)
 ed_time = time.perf_counter()
 print(f'margin 연산 소요시간: {ed_time - st_time:.6f}초')
 
@@ -328,9 +457,10 @@ print(f'margin 연산 소요시간: {ed_time - st_time:.6f}초')
 
 # ====================== binary_dilation 이후 시각화 ======================
 plt.figure(figsize=(6,6))
-plt.imshow(occ2d_inflated.T,         # 전방(y) 축이 위로 오도록 전치
-        origin='lower',  # 원점이 왼쪽 아래
-        cmap='gray_r')   # 0→흰색(free), 1→검은색(occupied)
+plt.imshow(occ2d_inflated.T,        # 전방(y) 축이 위로 오도록 전치
+        origin='lower',             # 원점이 왼쪽 아래
+        cmap='gray_r')              # 0→흰색(free), 1→검은색(occupied)
+        # extent=extent)            # m단위로 변환
 plt.colorbar(label='Occupancy')
 plt.xlabel('X index')
 plt.ylabel('Z index')
@@ -342,32 +472,48 @@ plt.show()
 
 # ====================== 2D A* 알고리즘 ======================
 st_time = time.perf_counter()
-# path2d = astar_2d(occ2d, start2d, goal2d) # 장애물 마진 없이 A*
-path2d = astar_2d(occ2d_inflated, start2d, goal2d) # 장애물 마진 넣어 A*
+path2d = astar_2d(ogm2d, start2d, goal2d) # 장애물 마진 없이 A*
+# path2d = astar_2d(occ2d_inflated, start2d, goal2d) # 장애물 마진 넣어 A*
 ed_time = time.perf_counter()
 print(f'A* 소요시간: {ed_time - st_time:.6f}초')
 if path2d:
     print('2D 경로 찾음')
-    print("2D 경로 인덱스:", path2d)
+    path_2d_arr = np.array(path2d, dtype=int)  # shape = (N, 2)
     
-    path_arr_2d = np.array(path2d, dtype=int)  # shape = (N, 2)
     
-    # 3D로 확장 위해 y(높이)정보 추가해줌
-    # k0 컬럼 생성
-    k0_col = np.full((path_arr_2d.shape[0], 1), k0, dtype=int)
-    # 수평으로 합쳐서 shape = (N,3) 배열 만들기
-    path_arr_3d = np.hstack((path_arr_2d, k0_col))
+    k0_col = np.full((path_2d_arr.shape[0], 1), k0, dtype=int) # 라이다 높이 때문에.... 8로 함
+    path_arr_3d = np.hstack((path_2d_arr, k0_col))
+    print("3차원공간의 2D 경로 인덱스:", path_arr_3d)
 else:
     print("2D에서 경로를 찾지 못했습니다.")
 
+# A*로 구한 path를 world좌표로 변환하기
+# path_world_2d = []  # 결과를 담을 리스트
+# for idx in path_2d_arr:
+#     i, j = idx
+#     # 셀의 중앙 좌표 = origin + (index + 0.5)*voxel_size
+#     x = origin[0] + (i + 0.5) * voxel_size
+#     z = origin[1] + (j + 0.5) * voxel_size
+#     path_world_2d.append((x, z))
+    
+path_world_3d = []  # 결과를 담을 리스트
+for idx in path_arr_3d:
+    i, k, j = idx
+    # 셀의 중앙 좌표 = origin + (index + 0.5)*voxel_size
+    x = origin[0] + (i) * voxel_size
+    z = origin[1] + (k) * voxel_size
+    y = origin[2] + (k + 0.5) * voxel_size
+    y = 10 # j,                                                                  라이다 높이 때문에 8로 함
+    path_world_3d.append((x, z, y))
+    
 
 # 3d맵 위에 2d path 그리기
-path_mask = np.zeros_like(occ, dtype=np.uint8)
-for (i, j) in path_arr_2d:
+path_mask = np.zeros_like(ogm, dtype=np.uint8)
+for (i, j) in path_2d_arr:
     path_mask[i, j, k0] = 1
 
-sp_mask = np.zeros_like(occ, dtype=np.uint8) # 시작점
-gp_mask = np.zeros_like(occ, dtype=np.uint8) # 도착점
+sp_mask = np.zeros_like(ogm, dtype=np.uint8) # 시작점
+gp_mask = np.zeros_like(ogm, dtype=np.uint8) # 도착점
 sp_mask[(start_idx[0], start_idx[1], k0)] = 1
 gp_mask[(goal_idx[0], goal_idx[1], k0)]  = 1
 
@@ -381,7 +527,7 @@ path_voxels_gp = grid.threshold(0.5, scalars="gp")
 
 plotter = pv.Plotter()
 plotter.add_mesh(voxels,        color="lightgray", opacity=0.6, show_edges=False)
-plotter.add_mesh(path_voxels,   color="yellow",     opacity=1.0,   show_edges=False)
+plotter.add_mesh(path_voxels,   color="red",     opacity=1.0,   show_edges=False)
 plotter.add_mesh(path_voxels_sp, color="blue",     opacity=1.0,   show_edges=False)
 plotter.add_mesh(path_voxels_gp, color="red",      opacity=1.0,   show_edges=False)
 plotter.show_grid(
@@ -402,23 +548,24 @@ plotter.close()
 
 # ====================== Linear Interpolation ======================
 ## 2d
-print(f"Before Linear Interpolation 2d way point 갯수: {len(path_arr_2d)} 개")
-plot_2d_data(path_arr_2d) # before interpolation 시각화 
-st_time = time.perf_counter()
-interpolated_2d_path_arr = resample_by_arc_length_2d(path_arr_2d, spacing = 0.5)
-ed_time = time.perf_counter()
-print(f'2d Linear Interpolation 소요시간: {ed_time - st_time:.6f}초')
-plot_2d_data(interpolated_2d_path_arr) # after interpolation 시각화 
-print(f"After Linear Interpolation way point 갯수: {len(interpolated_2d_path_arr)} 개")
+# print(f"Before Linear Interpolation 2d way point 갯수: {len(path_2d_arr)} 개")
+# plot_2d_data(path_2d_arr) # before interpolation 시각화 
+# st_time = time.perf_counter()
+# interpolated_2d_path_arr = resample_by_arc_length_2d(np.asarray(path_2d_arr), spacing = 0.5)
+# ed_time = time.perf_counter()
+# print(f'2d Linear Interpolation 소요시간: {ed_time - st_time:.6f}초')
+# plot_2d_data(interpolated_2d_path_arr) # after interpolation 시각화 
+# print(f"After Linear Interpolation way point 갯수: {len(interpolated_2d_path_arr)} 개")
 
 
 ## 3d
 print(f"Before Linear Interpolation 3d way point 갯수: {len(path_arr_3d)} 개")
-plot_3d_data(path_arr_3d) # before interpolation 시각화
+plot_3d_data(path_world_3d) # before interpolation 시각화
 st_time = time.perf_counter()
-interpolated_3d_path_arr = resample_by_arc_length_3d(path_arr_3d, spacing = 0.5)
+interpolated_3d_path_arr = resample_by_arc_length_3d(np.asarray(path_world_3d), spacing = 0.5)
 ed_time = time.perf_counter()
 print(f'3d Linear Interpolation 소요시간: {ed_time - st_time:.6f}초')
+print(f"After Linear Interpolation way point 갯수: {len(interpolated_3d_path_arr)} 개")
 plot_3d_data(interpolated_3d_path_arr) # after interpolation 시각화
 print(f"After Linear Interpolation way point 갯수: {len(interpolated_3d_path_arr)} 개")
 
@@ -426,9 +573,11 @@ print(f"After Linear Interpolation way point 갯수: {len(interpolated_3d_path_a
 
 
 # 패스 저장(.csv 방식)
-np.savetxt('interpolated_path_2d.csv', interpolated_2d_path_arr, delimiter=',', header='x,z', comments='')  # comments='' 로 '#' 주석 제거  
-np.savetxt('interpolated_path_3d.csv', interpolated_3d_path_arr, delimiter=',', header='x,z,y', comments='')  # comments='' 로 '#' 주석 제거  
-    
+# np.savetxt('interpolated_path_2d.csv', interpolated_2d_path_arr, delimiter=',', header='x,z', comments='')  # comments='' 로 '#' 주석 제거  
+# np.savetxt('interpolated_path_3d.csv', interpolated_3d_path_arr, delimiter=',', header='x,z,y', comments='', fmt='%.2f')  # comments='' 로 '#' 주석 제거  
+# np.savetxt('interpolated_path_3d_maze1.csv', interpolated_3d_path_arr, delimiter=',', header='x,z,y', comments='', fmt='%.2f')  # comments='' 로 '#' 주석 제거  
+np.savetxt('interpolated_path_3d_flat_and_hills_whole.csv', interpolated_3d_path_arr, delimiter=',', header='x,z,y', comments='', fmt='%.2f')  # comments='' 로 '#' 주석 제거 
+
 # # 2-3) A* 호출
 # path_idx = astar_3d(occ, start_idx, goal_idx)
 # if not path_idx:
