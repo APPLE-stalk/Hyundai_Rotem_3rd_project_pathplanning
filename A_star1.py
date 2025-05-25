@@ -4,6 +4,7 @@ import pyvista as pv
 from scipy.ndimage import binary_dilation # 장애물 마진 용
 import time
 import matplotlib.pyplot as plt
+from scipy import ndimage # 소벨마스크
 
 def heuristic(a, b):
     # Euclidean 거리
@@ -92,7 +93,6 @@ def plot_3d_data(data: np.ndarray):
 
 
 # 등간격(유클리디안) 선형 보간
-import numpy as np
 
 def resample_by_arc_length_2d(data: np.ndarray,
                         spacing: float,
@@ -159,7 +159,7 @@ def resample_by_arc_length_3d(data: np.ndarray,
     return np.vstack((x_new, y_new, z_new)).T
 
 
-from scipy import ndimage
+
 
 def wall_mask_from_ogm(ogm, voxel_size, grad_thresh):
     """
@@ -340,7 +340,7 @@ map_plotter.close()
 H = ogm_to_height_map(ogm, voxel_size=0.5, axis=2)
 
 # 기존 slope_mask 사용 예
-wall_mask_2d = slope_mask(H, h=0.5, theta_deg=30)
+wall_mask_2d = slope_mask(H, h=0.5, theta_deg=31)
 
 # 3) 시각화
 plt.figure(figsize=(12, 5))
@@ -356,7 +356,7 @@ plt.colorbar(label='Height (m)')
 # 벽 마스크 시각화
 plt.subplot(1, 2, 2)
 plt.imshow(wall_mask_2d.T, origin='lower', interpolation='nearest')
-plt.title(f'Wall Mask (>{45}°)')
+plt.title(f'Wall Mask (>{31}°)')
 plt.xlabel('X index')
 plt.ylabel('Z index')
 plt.colorbar(label='Wall Mask (True=Wall)')
