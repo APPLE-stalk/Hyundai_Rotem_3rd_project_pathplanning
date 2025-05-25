@@ -13,6 +13,7 @@ import math
 def astar_2d(occ2d, start, goal):
     nx, ny = occ2d.shape
     neigh = [(1,0),(-1,0),(0,1),(0,-1), (1, 1), (-1, 1), (-1, -1), (1, -1)]
+    # neigh = [(1,0),(-1,0),(0,1),(0,-1)]
     def h(a,b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
     open_set = [(h(start,goal), 0, start, None)]
     came, gscore = {}, {start:0}
@@ -155,8 +156,8 @@ def world_to_index(world_xy: np.ndarray, origin: np.ndarray, voxel_size: float, 
 def index_to_world(idx_rc, origin, voxel_size):
     """
     2-D 인덱스 (row, col) → 월드 좌표 (x, z) 변환
-      · row : “우( x )” 방향 인덱스
-      · col : “전방( z )”  방향 인덱스
+    · row : “우( x )” 방향 인덱스
+    · col : “전방( z )”  방향 인덱스
     """
     row, col = idx_rc            # (wp_idx[0], wp_idx[1])
     x = origin[0] + row * voxel_size
@@ -164,13 +165,13 @@ def index_to_world(idx_rc, origin, voxel_size):
     return np.array([x, z], dtype=float)
 
 def sample_ray_cells(start_pos: np.ndarray,          # ★ 월드 [x,z]
-                     direction: np.ndarray,          # 단위 벡터
+                    direction: np.ndarray,          # 단위 벡터
                      *,                             # 이후는 키워드 전용
-                     origin: np.ndarray,
-                     voxel_size: float,
-                     map_shape: tuple[int,int],
-                     max_range_m: float = 300.0,
-                     return_mode: str = "index"):   # "world" | "index"
+                    origin: np.ndarray,
+                    voxel_size: float,
+                    map_shape: tuple[int,int],
+                    max_range_m: float = 300.0,
+                    return_mode: str = "index"):   # "world" | "index"
     """반직선을 따라 찍히는 셀 목록 반환."""
     n_steps = int(max_range_m / voxel_size)
     cur     = start_pos.astype(float).copy()
@@ -441,15 +442,15 @@ def find_free_on_ray(
     return None, None
 
 def waypoint_on_approach_ring(O_xy,          # 적 전차 (x,z)
-                              heading,       # 적 전차 헤딩(rad)
-                              radius,        # approach_min
-                              binary_map, origin, voxel_size, map_shape,
-                              prefer_xy):    # 내 전차 (x,z)
+                            heading,       # 적 전차 헤딩(rad)
+                            radius,        # approach_min
+                            binary_map, origin, voxel_size, map_shape,
+                            prefer_xy):    # 내 전차 (x,z)
     """
     ▸ 적 전방 ± 150° 방향으로 원(approach_min) 위 두 점을 계산
     ▸ 맵 밖 / 장애물 셀은 제외
     ▸ 남은 점 가운데 내 전차에 더 가까운 것을 반환
-      (없으면 None, None)
+    (없으면 None, None)
     """
     cand_pts = []
     for sign in (+1, -1):                    # +150°, -150°
@@ -554,15 +555,20 @@ plt.show()
 # ====================== 전처리(2D slicing) ======================
 st_time = time.perf_counter()
 
-# x_s = 60                                                                # 시작 점 [우, 전방, 높이]
+# x_s = 60                                                                # 시작 점 [우, 전방, 높이, 헤딩(math_rad)]
 # z_s = 27
 x_s = 125
 z_s = 50
 y_s = 3
+h_s = 10/180*np.pi                                                          
 
-x_g = 120                                                               # 목표 점 [우, 전방, 높이]
+x_g = 120                                                               # 목표 점 [우, 전방, 높이, 헤딩(math_rad)]
 z_g = 250
 y_g = 3
+h_g = -160/180*np.pi
+
+approach_min = 50 # 적 전차 접근 기준 거리
+map_shape = (nx, nz)
 
 # 시작/목표 월드 좌표 → 그리드 인덱스로 변환
 start_world = np.array([x_s, z_s, y_s])
@@ -663,116 +669,59 @@ plt.grid(False)
 plt.show()
 
 
-# ====================== 맵 정보 ======================
-# origin = (0, 0, 0)
-# voxel_size = 0.5
-# binary_map = np.zeros((600, 600), dtype=np.uint8)
-# map_shape = (600, 600)
-
-# 갈 수 없는 지역 지정
-# fill_rect_obstacle(binary_map,
-#                 top_left_xy     = (50.0, 135.0),    # 좌상단  (x,z)
-#                 bottom_right_xy = (250.0, 50.0),  # 우하단  (x,z)
-#                 origin=origin, voxel_size=voxel_size)
-
-# ====================== 상황 정보 ======================
-# x_s = 10                                                                    # 시작 점 [우, 전방, 높이, 헤딩]
-# z_s = 20
-
-# x_s = 260
-# z_s = 260
-# x_s = 250
-# z_s = 235
-# y_s = 0
-h_s = 10/180*np.pi
-
-# x_g = 200                                                                   # 목표 점 [우, 전방, 높이, 헤딩]
-# z_g = 150
-# y_g = 0
-h_g = -160/180*np.pi
-# h_g = 45/180*np.pi
-
-approach_min = 50 # 적 전차 접근 기준 거리
-map_shape = (nx, nz)
-# ====================== 상황 정보 -> 맵 index 정보로 변환 ======================
-# start_world = np.array([x_s, z_s, y_s])
-# goal_world  = np.array([x_g, z_g, y_g])
-# start_idx = tuple(((start_world - origin) / voxel_size).astype(int))    # 월드좌표(m) -> 셀 인덱스(칸)
-# goal_idx  = tuple(((goal_world  - origin) / voxel_size).astype(int))
-
-# start2d = (start_idx[0], start_idx[1])  # 우, 전방 (인덱스 단위)
-# goal2d  = (goal_idx[0],  goal_idx[1])
-
 
 # ====================== 2D OGM 경유점 찾기 ======================
-# 내전차 heading 벡터 구하여 맵 index로 변환, 튜플(x, z)를 list로 묶어서 반환
+# 월드좌표에서 내전차 heading 벡터 반환
 hs_world  = sample_ray_cells(start_world[:2], heading_to_unit_vec(h_s),
                             origin=origin, voxel_size=voxel_size,
-                            map_shape=map_shape, max_range_m=10.0,
+                            map_shape=(nx, nz), max_range_m=10.0,
                             return_mode="world")
 
-# 적 전차 heading
+# 월드좌표에서  적 전차 heading 벡터 반환
 hg_world  = sample_ray_cells(goal_world[:2], heading_to_unit_vec(h_g),
                             origin=origin, voxel_size=voxel_size,
-                            map_shape=map_shape, max_range_m=10.0,
+                            map_shape=(nx, nz), max_range_m=10.0,
                             return_mode="world")
 
 # 적전차 heading +-90도 벡터
 v_left  = heading_to_unit_vec(h_g + np.pi / 2)   # world heading 기준 좌측 90° 벡터
 v_right = heading_to_unit_vec(h_g - np.pi / 2)   # world heading 우측 90° 벡터
 
-# 적전차 시야각 맵 index에서 구하기
-left_world  = sample_ray_cells(goal_world[:2], heading_to_unit_vec(h_g+np.pi/2),# 좌측 시야각 선, 튜플(x, z)를 list로 묶어서 반환
+# world좌표계 기준 적전차 시야각 ray
+left_world  = sample_ray_cells(goal_world[:2], v_left,# 좌측 시야각 선, 튜플(x, z)를 list로 묶어서 반환
                             origin=origin, voxel_size=voxel_size,
-                            map_shape=map_shape, max_range_m=300.0,
+                            map_shape=(nx, nz), max_range_m=300.0,
                             return_mode="world")   
-right_world = sample_ray_cells(goal_world[:2], heading_to_unit_vec(h_g-np.pi/2),
+right_world = sample_ray_cells(goal_world[:2], v_right,
                             origin=origin, voxel_size=voxel_size,
-                            map_shape=map_shape, max_range_m=300.0,
+                            map_shape=(nx, nz), max_range_m=300.0,
                             return_mode="world")   # 우측 시야각 선, 튜플(x, z)를 list로 묶어서 반환
 
-# ─── 2) A* · 시각화용 인덱스 변환 ───
-cells_hs    = [world_to_index(p, origin, voxel_size) for p in hs_world]
-cells_hg    = [world_to_index(p, origin, voxel_size) for p in hg_world]
-left_cells  = [world_to_index(p, origin, voxel_size) for p in left_world]
-right_cells = [world_to_index(p, origin, voxel_size) for p in right_world]
+                                                    # 시각화 위해 "전방" 좌표 따기
 
-# 적전차 좌우 시야각 시각화 위에 변환
-left_xs  = [col for row, col in left_cells]                                                         # 시각화 위해 "우" 좌표 따기 
-left_zs  = [row for row, col in left_cells]                                                         # 시각화 위해 "전방" 좌표 따기
 
-right_xs = [col for row, col in right_cells]                                                        # 시각화 위해  "우" 좌표 따기 
-right_zs = [row for row, col in right_cells]                                                        # 시각화 위해  "전방" 좌표 따기
-
-# 내 전차 전방 헤딩 시각화 위해 변환
-hs_xs = [col for row, col in cells_hs]
-hs_zs = [row for row, col in cells_hs]
-
-# 적 전차 전방 헤딩 시각화 위해 변환
-hg_xs = [col for row, col in cells_hg]
-hg_zs = [row for row, col in cells_hg]
 
 # ====================== 경유점 알고리즘 ======================
-front_flag = is_front(x_s, z_s, x_g, z_g, h_g)
+front_flag = is_front(x_s, z_s, x_g, z_g, h_g) # 내전차 우 전방, 적 전차 우 전방 헤딩
 
 if front_flag:
     print("내 전차는 적 전차의 전방에 있습니다.")
     print("조중수, 경유점 생성해서 적 측면 공격할 것")
     
     # ① 수선의 발 계산
-    F_left,  d_self_l, d_enemy_l  = foot_to_ray(start_world[:2], goal_world[:2], v_left, origin=origin, voxel_size=voxel_size, map_shape=map_shape)
+    F_left,  d_self_l, d_enemy_l  = foot_to_ray(start_world[:2], goal_world[:2], v_left, origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
     print('이거 우전방 맞냐', F_left)
-    F_right, d_self_r, d_enemy_r  = foot_to_ray(start_world[:2], goal_world[:2], v_right, origin=origin, voxel_size=voxel_size, map_shape=map_shape)
+    F_right, d_self_r, d_enemy_r  = foot_to_ray(start_world[:2], goal_world[:2], v_right, origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
 
 
     # ② ray 방향 클램프
     F_left_cl  = clamp_point_on_ray(
         F_left,  goal_world[:2], v_left,
-        origin=origin, voxel_size=voxel_size, map_shape=map_shape)
+        origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
     print('이것도 우전방 맞냐', F_left_cl)
     F_right_cl = clamp_point_on_ray(
         F_right, goal_world[:2], v_right,
-        origin=origin, voxel_size=voxel_size, map_shape=map_shape)
+        origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
 
     # ③ 내 전차와 더 가까운 쪽 선택
     if np.linalg.norm(start_world[:2] - F_left_cl) <= np.linalg.norm(start_world[:2] - F_right_cl):
@@ -800,7 +749,7 @@ if front_flag:
             # (2) 지도 밖으로 나갈 수 있으므로 다시 Ray-클램핑
             F_sel1 = clamp_point_on_ray(
                 F_sel1, goal_world[:2], u_sel,
-                origin=origin, voxel_size=voxel_size, map_shape=map_shape
+                origin=origin, voxel_size=voxel_size, map_shape=(nx, nz)
             )
             row_sel1, col_sel1 = world_to_index(F_sel1, origin, voxel_size)
             if occ2d_eroded_dilated_inflated[row_sel1, col_sel1] == 1:            # ← 막힌 셀
@@ -813,19 +762,19 @@ if front_flag:
                                                 # search_outward=True,
                                                 binary_map=occ2d_eroded_dilated_inflated,
                                                 origin=origin, voxel_size=voxel_size,
-                                                map_shape=map_shape)
+                                                map_shape=(nx, nz))
                 print('우우우우 전방', P_new)
                 # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
                 if P_new is None:
                     u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
                     _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
                                             origin=origin, voxel_size=voxel_size,
-                                            map_shape=map_shape)
+                                            map_shape=(nx, nz))
                     P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
                                                     search_outward=False,
                                                     binary_map=occ2d_eroded_dilated_inflated,
                                                     origin=origin, voxel_size=voxel_size,
-                                                    map_shape=map_shape)
+                                                    map_shape=(nx, nz))
                     if P_new is not None:
                         sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
 
@@ -897,7 +846,7 @@ if front_flag:
                                             # search_outward=True,
                                             binary_map=occ2d_eroded_dilated_inflated,
                                             origin=origin, voxel_size=voxel_size,
-                                            map_shape=map_shape)
+                                            map_shape=(nx, nz))
             print('fnfnfnfn', P_new)
             # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
             if P_new is None:
@@ -905,12 +854,12 @@ if front_flag:
                 u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
                 _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
                                         origin=origin, voxel_size=voxel_size,
-                                        map_shape=map_shape)
+                                        map_shape=(nx, nz))
                 P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
                                                 search_outward=False,
                                                 binary_map=occ2d_eroded_dilated_inflated,
                                                 origin=origin, voxel_size=voxel_size,
-                                                map_shape=map_shape)
+                                                map_shape=(nx, nz))
                 if P_new is not None:
                     sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
             # 3) 성공 시 경유점 갱신
@@ -956,7 +905,7 @@ if wp_idx is not None:        # 경유점이 있을 때
         binary_map = occ2d_eroded_dilated_inflated,
         origin     = origin,
         voxel_size = voxel_size,
-        map_shape  = map_shape,
+        map_shape  = (nx, nz),
         prefer_xy  = (wp_idx[0], wp_idx[1]))       # 경유점 우, 전방
     
     print('왜 이러냐', wp_ring_idx[0], wp_ring_idx[1])
@@ -1004,10 +953,30 @@ else:                          # 경유점이 없으면 한 번만
 # else:
 #     print("2D에서 경로를 찾지 못했습니다.")
     
+# ====================== 시각화 준비 ======================
+# ─── 2) A* · 시각화용 인덱스 변환 ───
+cells_hs    = [world_to_index(p, origin, voxel_size) for p in hs_world]
+cells_hg    = [world_to_index(p, origin, voxel_size) for p in hg_world]
+left_cells  = [world_to_index(p, origin, voxel_size) for p in left_world]
+right_cells = [world_to_index(p, origin, voxel_size) for p in right_world]
+
+# 적전차 좌우 시야각 시각화 위에 변환
+left_xs  = [col for row, col in left_cells]                                                         # 시각화 위해 "우" 좌표 따기 
+left_zs  = [row for row, col in left_cells]    
+
+right_xs = [col for row, col in right_cells]                                                        # 시각화 위해  "우" 좌표 따기 
+right_zs = [row for row, col in right_cells]                                                        # 시각화 위해  "전방" 좌표 따기
+
+# 내 전차 전방 헤딩 시각화 위해 변환
+hs_xs = [col for row, col in cells_hs]
+hs_zs = [row for row, col in cells_hs]
+
+# 적 전차 전방 헤딩 시각화 위해 변환
+hg_xs = [col for row, col in cells_hg]
+hg_zs = [row for row, col in cells_hg]
 
 
 
-# ====================== 2D OGM 맵에서 A* 결과 시각화 ======================
 plt.figure(figsize=(6, 6))
 plt.imshow(occ2d_eroded_dilated_inflated.T,     # 전방(y) 축이 위로 오도록 전치
         origin='lower',                         # 원점이 왼쪽 아래
