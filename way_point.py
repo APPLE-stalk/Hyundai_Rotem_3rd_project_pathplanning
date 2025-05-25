@@ -307,7 +307,7 @@ def fill_rect_obstacle(binary_map,
     # (4) 채우기
     binary_map[r0:r1+1, c0:c1+1] = 1
     
-    return binary_map
+    # return binary_map
     
 def find_free_on_ray(O_xy, u, start_t, *, search_outward,
                     binary_map, origin, voxel_size, map_shape,
@@ -546,7 +546,8 @@ fill_rect_obstacle(binary_map,
 
 # ====================== 상황 정보 ======================
 x_s = 10                                                                    # 시작 점 [우, 전방, 높이, 헤딩]
-z_s = 75
+z_s = 20
+
 # x_s = 260
 # z_s = 260
 # x_s = 250
@@ -554,7 +555,7 @@ z_s = 75
 y_s = 0
 h_s = 60/180*np.pi
 
-x_g = 150                                                                   # 목표 점 [우, 전방, 높이, 헤딩]
+x_g = 200                                                                   # 목표 점 [우, 전방, 높이, 헤딩]
 z_g = 150
 y_g = 0
 h_g = -160/180*np.pi
@@ -751,7 +752,6 @@ if front_flag:
             #         print("두 방향 모두에서 자유 셀을 찾지 못했습니다 → 경유점 사용 포기")
     
     else:
-        print('fffffffffffffff')
         if binary_map[row_sel, col_sel] == 1:            # ← 막힌 셀
             print("경유점이 장애물!  FOV 선을 따라 재검색")
 
@@ -766,7 +766,6 @@ if front_flag:
 
             # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
             if P_new is None:
-                print('nnnnnnnn')
                 u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
                 _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
                                         origin=origin, voxel_size=voxel_size,
@@ -791,18 +790,41 @@ if front_flag:
 else:
     print("내 전차는 적 전차의 후방에 있습니다.")
     print("조종수, 최단거리로 공격할 것!")
+    
+# ====================== 만들어진 경유점 정리 ======================
+# ── 경유점 인덱스(wp_idx) 확정 ────────────────────────────
+wp_idx = None
+if   "row_sel3" in locals() and row_sel3 is not None:   # 재검색 성공
+    wp_idx = (row_sel3, col_sel3)
+elif "row_sel2" in locals() and row_sel2 is not None:   # 최소거리 적용
+    wp_idx = (row_sel2, col_sel2)
+elif "row_sel1" in locals() and row_sel1 is not None:   # 접근만 적용
+    wp_idx = (row_sel1, col_sel1)
+elif "row_sel"  in locals() and row_sel  is not None:   # 최초 수선의 발
+    wp_idx = (row_sel,  col_sel)
 
+# ====================== 2D A* 알고리즘 2회 실시 ======================
+if wp_idx is not None:        # 경유점이 있을 때
+    path_s2w = astar_2d(binary_map.T, start2d, (wp_idx[1], wp_idx[0]))
+    path_w2g = astar_2d(binary_map.T, (wp_idx[1], wp_idx[0]),  goal2d)
+    # ♦ 두 경로를 합칠 때 중복되는 웨이포인트 하나 제거
+    path_full = path_s2w[:-1] + path_w2g
+else:                          # 경유점이 없으면 한 번만
+    path_s2w = []
+    path_w2g = []
+    path_full = astar_2d(binary_map, start2d, goal2d)
+    
 
 # ====================== 2D A* 알고리즘 ======================
-st_time = time.perf_counter()
-# path2d = astar_2d(ogm2d, start2d, goal2d)                                 # 장애물 마진 없이 A*
+# st_time = time.perf_counter()
+# # path2d = astar_2d(ogm2d, start2d, goal2d)                                 # 장애물 마진 없이 A*
 
-path2d = astar_2d(binary_map, start2d, goal2d)           # 장애물 마진 넣어서 A*
-ed_time = time.perf_counter()
-print(f'A* 소요시간: {ed_time - st_time:.6f}초')
-if path2d:
-    print('2D 경로 찾음')
-    path_2d_arr = np.array(path2d, dtype=int)  # shape = (N, 2)
+# path2d = astar_2d(binary_map, start2d, goal2d)           # 장애물 마진 넣어서 A*
+# ed_time = time.perf_counter()
+# print(f'A* 소요시간: {ed_time - st_time:.6f}초')
+# if path2d:
+#     print('2D 경로 찾음')
+#     path_2d_arr = np.array(path2d, dtype=int)  # shape = (N, 2)
     
     # k0_col = np.full((path_2d_arr.shape[0], 1), 0, dtype=int)
     # for idx in range(len(path_2d_arr)):
@@ -819,8 +841,8 @@ if path2d:
 #         y = origin[2] + (j + 0.5) * voxel_size
 #         path_world_3d.append((x, z, y))
 #     print("3차원공간의 3D 경로 인덱스:", path_arr_3d)
-else:
-    print("2D에서 경로를 찾지 못했습니다.")
+# else:
+#     print("2D에서 경로를 찾지 못했습니다.")
     
 
 
@@ -867,10 +889,28 @@ if "col_sel3" in locals() and "row_sel3" in locals() and col_sel3 is not None an
                 label=f'{sel_side} foot (clamped)')
 
 # path2d 궤적 추가
-xs, zs = zip(*path2d)  
-plt.scatter(xs, zs, s=3, c='orange', marker='o',label='path2d') # path
-plt.scatter(x_s/voxel_size, z_s/voxel_size, s=3, c='blue', marker='o', label='Start Point') # sp
-plt.scatter(x_g/voxel_size, z_g/voxel_size, s=3, c='red', marker='o', label='Goal Point') # gp
+# xs, zs = zip(*path2d)  
+# plt.scatter(xs, zs, s=3, c='orange', marker='o',label='path2d') # path
+# plt.scatter(x_s/voxel_size, z_s/voxel_size, s=3, c='blue', marker='o', label='Start Point') # sp
+# plt.scatter(x_g/voxel_size, z_g/voxel_size, s=3, c='red', marker='o', label='Goal Point') # gp
+
+# 경유점 포함한 a* path 궤적 추가
+if path_s2w:                                  # 시작 → 웨이포인트
+    xs1, zs1 = zip(*path_s2w)
+    plt.plot(xs1, zs1, color='orange', lw=2, label='Start → WP')
+
+if path_w2g:                                  # 웨이포인트 → 목표
+    xs2, zs2 = zip(*path_w2g)
+    plt.plot(xs2, zs2, color='blue',   lw=2, label='WP → Goal')
+
+if not path_s2w and not path_w2g:             # 경유점 없이 한 번에
+    xs, zs = zip(*path_full)
+    plt.plot(xs, zs, color='orange', lw=2, label='Start → Goal')
+    
+# 웨이포인트 마커
+if wp_idx is not None:
+    plt.scatter(wp_idx[1], wp_idx[0], s=60, c='red',
+                marker='X', zorder=5, label='Waypoint')
 
 plt.legend(loc='best')
 
