@@ -6,6 +6,7 @@ from scipy.ndimage import binary_erosion    # 노이즈 erosion
 import time
 import matplotlib.pyplot as plt
 from scipy import ndimage # 소벨마스크
+import matplotlib.patches as mpatches # 적전차 최소 접근거리 시각화
 
 # 2D OGM에서 A*
 def astar_2d(occ2d, start, goal):
@@ -142,11 +143,10 @@ def heading_to_unit_vec(theta_rad: float) -> np.ndarray:
     return np.array([np.cos(theta_rad), np.sin(theta_rad)])
 
 # world 좌표를 voxel단위 binary map 좌표로 변환
-def world_to_index(world_xy: np.ndarray,
-                   origin: np.ndarray,
-                   voxel_size: float,
-                   *, round_mode="floor") -> tuple[int, int]:
+def world_to_index(world_xy: np.ndarray, origin: np.ndarray, voxel_size: float, *, round_mode="floor") -> tuple[int, int]:
     """월드 (x,z) → (row, col).  round_mode = 'floor' | 'nearest'"""
+    world_xy = np.asarray(world_xy, dtype=float)       # ★ 추가
+    origin   = np.asarray(origin[:2], dtype=float)     # ★ 추가
     rel = (world_xy - origin[:2]) / voxel_size
     idx = np.floor(rel).astype(int) if round_mode == "floor" else np.rint(rel).astype(int)
     return int(idx[1]), int(idx[0])
@@ -286,6 +286,78 @@ def clamp_point_on_ray(F: np.ndarray,        # 수선의 발(월드)
     # 2) 클램핑
     t_clamped  = np.clip(t_F, 0.0, t_max_rect)
     return O + t_clamped * u             # 월드 좌표
+
+# 갈 수 없는 사각형(world 좌표)를 1로 채우기
+def fill_rect_obstacle(binary_map,
+                       top_left_xy, bottom_right_xy,   # 월드 좌표 (x,z)
+                       origin, voxel_size):
+    # (1) 월드 → 셀 인덱스
+    row_tl, col_tl = world_to_index(top_left_xy,     origin, voxel_size)
+    row_br, col_br = world_to_index(bottom_right_xy, origin, voxel_size)
+
+    # (2) 행/열 정렬 (좌상단·우하단이 바뀌어 들어와도 대응)
+    r0, r1 = sorted((row_tl, row_br))
+    c0, c1 = sorted((col_tl, col_br))
+
+    # (3) 맵 경계 클램핑
+    r0 = max(r0, 0);              c0 = max(c0, 0)
+    r1 = min(r1, binary_map.shape[0]-1)
+    c1 = min(c1, binary_map.shape[1]-1)
+
+    # (4) 채우기
+    binary_map[r0:r1+1, c0:c1+1] = 1
+    
+    return binary_map
+    
+def find_free_on_ray(O_xy, u, start_t, *, search_outward,
+                    binary_map, origin, voxel_size, map_shape,
+                    max_extra=300.0, step=0.5):
+    """
+    O + t·u 선에서 0.5 m 간격으로 이동하며
+    binary_map==0 인 첫 셀을 찾아 (월드좌표, 인덱스) 반환.
+    search_outward=True  → t 증가 방향,  False → t 감소 방향.
+    """
+
+    # ── 0. 단위벡터 보정 ───────────────────────────────
+    u = u / np.linalg.norm(u)
+
+    # ── 1. 지도 경계까지 허용되는 t_max 계산 ──────────
+    if u[0] > 0:
+        t_x = (origin[0] + (map_shape[1]-1)*voxel_size - O_xy[0]) / u[0]
+    elif u[0] < 0:
+        t_x = (origin[0] - O_xy[0]) / u[0]
+    else:                                    # u.x == 0
+        t_x = np.inf
+
+    if u[1] > 0:
+        t_z = (origin[1] + (map_shape[0]-1)*voxel_size - O_xy[1]) / u[1]
+    elif u[1] < 0:
+        t_z = (origin[1] - O_xy[1]) / u[1]
+    else:                                    # u.z == 0
+        t_z = np.inf
+
+    t_max_map = max(0.0, min(t_x, t_z))      # 음수 방지
+
+    # ── 2. t 증분 검색 ───────────────────────────────
+    dir_sign = 1 if search_outward else -1
+    t = start_t
+    n_steps = int(max_extra / step)
+
+    for _ in range(n_steps):
+        t += dir_sign * step
+        if t < 0 or t > t_max_map:           # 지도 밖
+            break
+
+        P = O_xy + t*u                       # 월드 좌표
+        row, col = world_to_index(P, origin, voxel_size)
+        if not (0 <= row < map_shape[0] and 0 <= col < map_shape[1]):
+            break                            # 안전장치
+
+        if binary_map[row, col] == 0:        # ★ 첫 자유 셀
+            return P, (row, col)
+
+    return None, None
+
 
 # # ====================== OGM(.npy) 불러오기 ======================
 # st_time = time.perf_counter()
@@ -466,23 +538,29 @@ voxel_size = 0.5
 binary_map = np.zeros((600, 600), dtype=np.uint8)
 map_shape = (600, 600)
 
+# 갈 수 없는 지역 지정
+fill_rect_obstacle(binary_map,
+                top_left_xy     = (50.0, 135.0),    # 좌상단  (x,z)
+                bottom_right_xy = (250.0, 50.0),  # 우하단  (x,z)
+                origin=origin, voxel_size=voxel_size)
+
 # ====================== 상황 정보 ======================
-# x_s = 10                                                                    # 시작 점 [우, 전방, 높이, 헤딩]
-# z_s = 20
+x_s = 10                                                                    # 시작 점 [우, 전방, 높이, 헤딩]
+z_s = 75
 # x_s = 260
 # z_s = 260
-x_s = 250
-z_s = 235
+# x_s = 250
+# z_s = 235
 y_s = 0
 h_s = 60/180*np.pi
 
-x_g = 250                                                                   # 목표 점 [우, 전방, 높이, 헤딩]
-z_g = 280
+x_g = 150                                                                   # 목표 점 [우, 전방, 높이, 헤딩]
+z_g = 150
 y_g = 0
 h_g = -160/180*np.pi
 # h_g = 45/180*np.pi
 
-approach_min = 100 # 적 전차 접근 기준 거리
+approach_min = 50 # 적 전차 접근 기준 거리
 
 # ====================== 상황 정보 -> 맵 index 정보로 변환 ======================
 start_world = np.array([x_s, z_s, y_s])
@@ -576,7 +654,7 @@ if front_flag:
     print(f"{sel_side} FOV 수선의 발(클램프) 좌표 : ({F_sel[0]:.3f}, {F_sel[1]:.3f}) m")
     print(f"적 전차  →  수선의 발 거리          : {d_enemy_sel:.3f} m")
     
-    # 최초 경유점 시각화
+    # 최초 경유점 시각화용
     row_sel, col_sel = world_to_index(F_sel, origin, voxel_size)
     
     # 수선의 발이 최소 접근거리보다 작은 경우
@@ -584,21 +662,131 @@ if front_flag:
         u_sel = v_left / np.linalg.norm(v_left) if sel_side == "Left" else v_right / np.linalg.norm(v_right)
         if d_enemy_sel < approach_min:
             # (1) 적 전차 위치 O 기준, 같은 방향 단위벡터 u_sel 로 approach_min 만큼 이동
-            F_sel = goal_world[:2] + approach_min * u_sel
+            F_sel1 = goal_world[:2] + approach_min * u_sel
 
             # (2) 지도 밖으로 나갈 수 있으므로 다시 Ray-클램핑
-            # F_sel = clamp_point_on_ray(
-            #     F_sel, goal_world[:2], u_sel,
-            #     origin=origin, voxel_size=voxel_size, map_shape=map_shape
-            # )
+            F_sel1 = clamp_point_on_ray(
+                F_sel1, goal_world[:2], u_sel,
+                origin=origin, voxel_size=voxel_size, map_shape=map_shape
+            )
+            row_sel1, col_sel1 = world_to_index(F_sel1, origin, voxel_size)
+            if binary_map[row_sel1, col_sel1] == 1:            # ← 막힌 셀
+                print("경유점이 장애물!  FOV 선을 따라 재검색")
 
-            # (3) 거리 재계산·로그
-            d_enemy_sel = np.linalg.norm(goal_world[:2] - F_sel)
-            print(f"[최소 접근거리 적용] 새 수선의 발 : ({F_sel[0]:.3f}, {F_sel[1]:.3f}) m")
-            print(f"적 전차 → 수선의 발 거리      : {d_enemy_sel:.3f} m")
-            row_sel2, col_sel2 = world_to_index(F_sel, origin, voxel_size)
+                # 1) 먼저 선택된 시야각(u_sel) 방향으로 맵 안쪽 끝까지 OUTWARD 탐색
+                u_sel   = v_left/np.linalg.norm(v_left) if sel_side=="Left" else v_right/np.linalg.norm(v_right)
+                t_start = np.dot(F_sel - goal_world[:2], u_sel)
+                P_new, idx_new = find_free_on_ray(goal_world[:2], u_sel, t_start,
+                                                search_outward=True,
+                                                binary_map=binary_map,
+                                                origin=origin, voxel_size=voxel_size,
+                                                map_shape=map_shape)
+
+                # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
+                if P_new is None:
+                    u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
+                    _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
+                                            origin=origin, voxel_size=voxel_size,
+                                            map_shape=map_shape)
+                    P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
+                                                    search_outward=False,
+                                                    binary_map=binary_map,
+                                                    origin=origin, voxel_size=voxel_size,
+                                                    map_shape=map_shape)
+                    if P_new is not None:
+                        sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
+
+                # 3) 성공 시 경유점 갱신
+                if P_new is not None:
+                    F_sel2         = P_new
+                    row_sel2, col_sel2 = idx_new
+                    d_enemy_sel2   = np.linalg.norm(goal_world[:2] - F_sel2)
+                    print(f"[재검색 성공] 새 경유점 ({sel_side}) : "
+                        f"{F_sel2[0]:.2f}, {F_sel2[1]:.2f} m  (적 거리 {d_enemy_sel2:.2f} m)")
+                else:
+                    print("두 방향 모두에서 자유 셀을 찾지 못했습니다 → 경유점 사용 포기")
+                    
+            if "row_sel2" in locals() and row_sel2 is not None and "col_sel2" in locals() and col_sel2 is not None:
+                pass
+            else:
+                # (3) 거리 재계산·로그 # 근접문제 해결 후 True문제 없는 경우
+                d_enemy_sel1 = np.linalg.norm(goal_world[:2] - F_sel1)
+                print(f"[최소 접근거리 적용] 새 수선의 발 : ({F_sel1[0]:.3f}, {F_sel1[1]:.3f}) m")
+                print(f"적 전차 → 수선의 발 거리      : {d_enemy_sel1:.3f} m")
+                row_sel1, col_sel1 = world_to_index(F_sel1, origin, voxel_size)
+            
+            # if binary_map[row_sel1, col_sel1] == 1:            # ← 막힌 셀
+            #     print("경유점이 장애물!  FOV 선을 따라 재검색")
+
+            #     # 1) 먼저 선택된 시야각(u_sel) 방향으로 맵 안쪽 끝까지 OUTWARD 탐색
+            #     u_sel   = v_left/np.linalg.norm(v_left) if sel_side=="Left" else v_right/np.linalg.norm(v_right)
+            #     t_start = np.dot(F_sel - goal_world[:2], u_sel)
+            #     P_new, idx_new = find_free_on_ray(goal_world[:2], u_sel, t_start,
+            #                                     search_outward=True,
+            #                                     binary_map=binary_map,
+            #                                     origin=origin, voxel_size=voxel_size,
+            #                                     map_shape=map_shape)
+
+            #     # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
+            #     if P_new is None:
+            #         u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
+            #         _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
+            #                                 origin=origin, voxel_size=voxel_size,
+            #                                 map_shape=map_shape)
+            #         P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
+            #                                         search_outward=False,
+            #                                         binary_map=binary_map,
+            #                                         origin=origin, voxel_size=voxel_size,
+            #                                         map_shape=map_shape)
+            #         if P_new is not None:
+            #             sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
+            #     # 3) 성공 시 경유점 갱신
+            #     if P_new is not None:
+            #         F_sel         = P_new
+            #         row_sel3, col_sel3 = idx_new
+            #         d_enemy_sel   = np.linalg.norm(goal_world[:2] - F_sel)
+            #         print(f"[재검색 성공] 새 경유점 ({sel_side}) : "
+            #             f"{F_sel[0]:.2f}, {F_sel[1]:.2f} m  (적 거리 {d_enemy_sel:.2f} m)")
+            #     else:
+            #         print("두 방향 모두에서 자유 셀을 찾지 못했습니다 → 경유점 사용 포기")
     
-    
+    else:
+        print('fffffffffffffff')
+        if binary_map[row_sel, col_sel] == 1:            # ← 막힌 셀
+            print("경유점이 장애물!  FOV 선을 따라 재검색")
+
+            # 1) 먼저 선택된 시야각(u_sel) 방향으로 맵 안쪽 끝까지 OUTWARD 탐색
+            u_sel   = v_left/np.linalg.norm(v_left) if sel_side=="Left" else v_right/np.linalg.norm(v_right)
+            t_start = np.dot(F_sel - goal_world[:2], u_sel)
+            P_new, idx_new = find_free_on_ray(goal_world[:2], u_sel, t_start,
+                                            search_outward=True,
+                                            binary_map=binary_map,
+                                            origin=origin, voxel_size=voxel_size,
+                                            map_shape=map_shape)
+
+            # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
+            if P_new is None:
+                print('nnnnnnnn')
+                u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
+                _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
+                                        origin=origin, voxel_size=voxel_size,
+                                        map_shape=map_shape)
+                P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
+                                                search_outward=False,
+                                                binary_map=binary_map,
+                                                origin=origin, voxel_size=voxel_size,
+                                                map_shape=map_shape)
+                if P_new is not None:
+                    sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
+            # 3) 성공 시 경유점 갱신
+            if P_new is not None:
+                F_sel3         = P_new
+                row_sel3, col_sel3 = idx_new
+                d_enemy_sel3   = np.linalg.norm(goal_world[:2] - F_sel3)
+                print(f"[재검색 성공] 새 경유점 ({sel_side}) : "
+                    f"{F_sel3[0]:.2f}, {F_sel3[1]:.2f} m  (적 거리 {d_enemy_sel3:.2f} m)")
+            else:
+                print("두 방향 모두에서 자유 셀을 찾지 못했습니다 → 경유점 사용 포기")
 
 else:
     print("내 전차는 적 전차의 후방에 있습니다.")
@@ -639,7 +827,7 @@ else:
 
 # ====================== 2D OGM 맵에서 A* 결과 시각화 ======================
 plt.figure(figsize=(6, 6))
-plt.imshow(binary_map.T,     # 전방(y) 축이 위로 오도록 전치
+plt.imshow(binary_map,     # 전방(y) 축이 위로 오도록 전치
         origin='lower',                         # 원점이 왼쪽 아래
         cmap='gray_r')                          # 0→흰색(free), 1→검은색(occupied)
 plt.colorbar(label='Occupancy')
@@ -652,13 +840,30 @@ plt.plot(hg_xs, hg_zs, linewidth=2, color='yellow', label='Heading h_g (10 m)')
 plt.scatter(left_xs,  left_zs,  s=1, c='lime',    marker='.', label='Left FOV boundary')
 plt.scatter(right_xs, right_zs, s=1, c='magenta', marker='.', label='Right FOV boundary')
 
+# 적전차 최소 접근거리 시각화
+row_c, col_c = world_to_index(goal_world[:2], origin, voxel_size)
+circle = plt.Circle((col_c, row_c),               # (x, y) = (col, row)
+                    radius=approach_min/voxel_size,
+                    fill=False,                   # 내부 비우기
+                    edgecolor='red',
+                    linewidth=1.5,
+                    linestyle='-',
+                    label=f'{approach_min:.0f} m radius')
+plt.gca().add_patch(circle)      # 또는 ax.add_patch(circle)
+
 # 맵 내부의 최초 경유점(수선의 발)
-plt.scatter(col_sel, row_sel, s=40, c='black', marker='X',
-            label=f'{sel_side} foot (clamped)')
+if "col_sel" in locals() and "row_sel" in locals() and col_sel is not None and row_sel is not None:
+    plt.scatter(col_sel, row_sel, s=40, c='gray', marker='X',
+                label=f'{sel_side} foot (clamped)')
 
 # 최소 접근 거래 내부로 찍힌 경우 최소 접근거리로 경유점 재설정 시각화
 if "col_sel2" in locals() and "row_sel2" in locals() and col_sel2 is not None and row_sel2 is not None:
     plt.scatter(col_sel2, row_sel2, s=40, c='yellow', marker='X',
+                label=f'{sel_side} foot (clamped)')
+    
+# 찾은 경유점이 갈 수 없을 때 시야각선 따라서 재탐색 시각화
+if "col_sel3" in locals() and "row_sel3" in locals() and col_sel3 is not None and row_sel3 is not None:
+    plt.scatter(col_sel3, row_sel3, s=40, c='pink', marker='X',
                 label=f'{sel_side} foot (clamped)')
 
 # path2d 궤적 추가
