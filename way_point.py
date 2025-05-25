@@ -14,6 +14,7 @@ def astar_2d(occ2d, start, goal):
     nx, ny = occ2d.shape
     neigh = [(1,0),(-1,0),(0,1),(0,-1), (1, 1), (-1, 1), (-1, -1), (1, -1)]
     # neigh = [(1,0),(-1,0),(0,1),(0,-1)]
+    # neigh = [(2,0),(-2,0),(0,2),(0,-2), (2, 2), (-2, 2), (-2, -2), (2, -2)]
     def h(a,b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
     open_set = [(h(start,goal), 0, start, None)]
     came, gscore = {}, {start:0}
@@ -488,6 +489,10 @@ print('voxel_size: ', voxel_size)
 ed_time = time.perf_counter()
 print(f'OGM_with_meta파일 읽기 소요시간: {ed_time - st_time:.6f}초')
 
+# 601 600 131 이라서 자르기
+ogm = ogm[:600, :600, :]
+    
+    
 # PyVista 시각화에 필요한 Data 생성
 nx, nz, ny = ogm.shape                              # 우, 전방, 높이의 칸수, 칸수*voxel_size가 실제 길이
 grid = pv.ImageData(                                # PyVista에서 [격자(point) + 셀(cell)] 구조를 만드는 클래스
@@ -557,13 +562,15 @@ st_time = time.perf_counter()
 
 # x_s = 60                                                                # 시작 점 [우, 전방, 높이, 헤딩(math_rad)]
 # z_s = 27
-x_s = 125
-z_s = 50
+# x_s = 125
+# z_s = 90
+x_s = 50
+z_s = 250
 y_s = 3
 h_s = 10/180*np.pi                                                          
 
-x_g = 120                                                               # 목표 점 [우, 전방, 높이, 헤딩(math_rad)]
-z_g = 250
+x_g = 250                                                               # 목표 점 [우, 전방, 높이, 헤딩(math_rad)]
+z_g = 50
 y_g = 3
 h_g = -160/180*np.pi
 
@@ -643,17 +650,6 @@ n_margin    = int(np.ceil(tank_radius / voxel_size))
 struct2d = np.ones((8, 8), dtype=bool)
 occ2d_eroded_dilated_inflated = binary_dilation(occ2d_eroded_dilated, structure=struct2d)   # 2D slice에만 마진 적용
 
-########### 덕규 코드
-from scipy.ndimage import binary_closing, binary_fill_holes
-# 1. binary_closing으로 작은 구멍 및 부분적 구멍 채우기
-structure = np.ones((7, 7), dtype=bool)  # 7x7 구조 요소, 큰 구멍을 위해 조정 가능
-occ2d_closed = binary_closing(occ2d_eroded_dilated_inflated, structure=structure).astype(bool)
-
-# 2. binary_fill_holes으로 완전히 둘러싸인 큰 구멍 채우기
-occ2d_filled = binary_fill_holes(occ2d_closed).astype(bool)
-# print(f"Filled shape: {occ2d_filled.shape}")  # (300, 300)
-
-occ2d_eroded_dilated_inflated = occ2d_filled
 # ====================== 시각화 ======================
 plt.subplot(2, 2, 4)
 plt.imshow(occ2d_eroded_dilated_inflated.T,         # 전방(y) 축이 위로 오도록 전치
@@ -668,31 +664,45 @@ plt.grid(False)
 # plt.tight_layout()
 plt.show()
 
+########### 덕규 코드
+from scipy.ndimage import binary_closing, binary_fill_holes
+# 1. binary_closing으로 작은 구멍 및 부분적 구멍 채우기
+structure = np.ones((7, 7), dtype=bool)  # 7x7 구조 요소, 큰 구멍을 위해 조정 가능
+occ2d_closed = binary_closing(occ2d_eroded_dilated_inflated, structure=structure).astype(bool)
+
+# 2. binary_fill_holes으로 완전히 둘러싸인 큰 구멍 채우기
+occ2d_filled = binary_fill_holes(occ2d_closed).astype(bool)
+# print(f"Filled shape: {occ2d_filled.shape}")  # (300, 300)
+
+
+
 
 
 # ====================== 2D OGM 경유점 찾기 ======================
+## 내 전차
 # 월드좌표에서 내전차 heading 벡터 반환
 hs_world  = sample_ray_cells(start_world[:2], heading_to_unit_vec(h_s),
                             origin=origin, voxel_size=voxel_size,
                             map_shape=(nx, nz), max_range_m=10.0,
                             return_mode="world")
 
-# 월드좌표에서  적 전차 heading 벡터 반환
+## 적 전차
+# 월드좌표에서 적 전차 heading 벡터 반환
 hg_world  = sample_ray_cells(goal_world[:2], heading_to_unit_vec(h_g),
                             origin=origin, voxel_size=voxel_size,
                             map_shape=(nx, nz), max_range_m=10.0,
                             return_mode="world")
 
 # 적전차 heading +-90도 벡터
-v_left  = heading_to_unit_vec(h_g + np.pi / 2)   # world heading 기준 좌측 90° 벡터
-v_right = heading_to_unit_vec(h_g - np.pi / 2)   # world heading 우측 90° 벡터
+h_g_v_left  = heading_to_unit_vec(h_g + np.pi / 2)   # world heading 기준 좌측 90° 벡터
+h_g_v_right = heading_to_unit_vec(h_g - np.pi / 2)   # world heading 우측 90° 벡터
 
 # world좌표계 기준 적전차 시야각 ray
-left_world  = sample_ray_cells(goal_world[:2], v_left,# 좌측 시야각 선, 튜플(x, z)를 list로 묶어서 반환
+h_g_v_left_ray  = sample_ray_cells(goal_world[:2], h_g_v_left,# 좌측 시야각 선, 튜플(x, z)를 list로 묶어서 반환
                             origin=origin, voxel_size=voxel_size,
                             map_shape=(nx, nz), max_range_m=300.0,
-                            return_mode="world")   
-right_world = sample_ray_cells(goal_world[:2], v_right,
+                            return_mode="world") 
+h_g_v_right_ray = sample_ray_cells(goal_world[:2], h_g_v_right,
                             origin=origin, voxel_size=voxel_size,
                             map_shape=(nx, nz), max_range_m=300.0,
                             return_mode="world")   # 우측 시야각 선, 튜플(x, z)를 list로 묶어서 반환
@@ -705,28 +715,24 @@ right_world = sample_ray_cells(goal_world[:2], v_right,
 front_flag = is_front(x_s, z_s, x_g, z_g, h_g) # 내전차 우 전방, 적 전차 우 전방 헤딩
 
 if front_flag:
-    print("내 전차는 적 전차의 전방에 있습니다.")
+    print("단차는 적 전차 시야각 전방에 위치한다!")
     print("조중수, 경유점 생성해서 적 측면 공격할 것")
     
-    # ① 수선의 발 계산
-    F_left,  d_self_l, d_enemy_l  = foot_to_ray(start_world[:2], goal_world[:2], v_left, origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
-    print('이거 우전방 맞냐', F_left)
-    F_right, d_self_r, d_enemy_r  = foot_to_ray(start_world[:2], goal_world[:2], v_right, origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
+    # world 좌표에서 수선의 발 계산 # world 좌표에서 우, 전방
+    F_left,  d_self_l, d_enemy_l  = foot_to_ray(start_world[:2], goal_world[:2], h_g_v_left, origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
+    F_right, d_self_r, d_enemy_r  = foot_to_ray(start_world[:2], goal_world[:2], h_g_v_right, origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
 
-
-    # ② ray 방향 클램프
+    # 수선의 발 map 안쪽으로 clamp
     F_left_cl  = clamp_point_on_ray(
-        F_left,  goal_world[:2], v_left,
+        F_left,  goal_world[:2], h_g_v_left,
         origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
-    print('이것도 우전방 맞냐', F_left_cl)
     F_right_cl = clamp_point_on_ray(
-        F_right, goal_world[:2], v_right,
+        F_right, goal_world[:2], h_g_v_right,
         origin=origin, voxel_size=voxel_size, map_shape=(nx, nz))
 
-    # ③ 내 전차와 더 가까운 쪽 선택
+    # world좌표에서 적 전차 기준 좌, 우에서 내 전차와 가까운 점 선택
     if np.linalg.norm(start_world[:2] - F_left_cl) <= np.linalg.norm(start_world[:2] - F_right_cl):
         F_sel       = F_left_cl
-        print('이이이이거 우전방 맞냐', F_sel)
         d_enemy_sel = np.linalg.norm(goal_world[:2] - F_left_cl)
         sel_side    = "Left"
     else:
@@ -734,135 +740,89 @@ if front_flag:
         d_enemy_sel = np.linalg.norm(goal_world[:2] - F_right_cl)
         sel_side    = "Right"
     print(f"{sel_side} FOV 수선의 발(클램프) 좌표 : ({F_sel[0]:.3f}, {F_sel[1]:.3f}) m")
-    print(f"적 전차  →  수선의 발 거리          : {d_enemy_sel:.3f} m")
+    print(f"적 전차로부터  →  수선의 발 거리          : {d_enemy_sel:.3f} m")
     
     # 최초 경유점 시각화용
-    r_sel, f_sel = world_to_index(F_sel, origin, voxel_size) # 우 전방
-    print('uuuuuuuuuuuuuuu', r_sel, f_sel)
+    r_sel, f_sel = world_to_index(F_sel, origin, voxel_size) # map index 우 전방
+    
+    
+    # 예외처리 시작
     # 수선의 발이 최소 접근거리보다 작은 경우
     if(d_enemy_sel < approach_min): 
-        u_sel = v_left / np.linalg.norm(v_left) if sel_side == "Left" else v_right / np.linalg.norm(v_right)
-        if d_enemy_sel < approach_min:
-            # (1) 적 전차 위치 O 기준, 같은 방향 단위벡터 u_sel 로 approach_min 만큼 이동
-            F_sel1 = goal_world[:2] + approach_min * u_sel
-
-            # (2) 지도 밖으로 나갈 수 있으므로 다시 Ray-클램핑
-            F_sel1 = clamp_point_on_ray(
-                F_sel1, goal_world[:2], u_sel,
-                origin=origin, voxel_size=voxel_size, map_shape=(nx, nz)
-            )
-            row_sel1, col_sel1 = world_to_index(F_sel1, origin, voxel_size)
-            if occ2d_eroded_dilated_inflated[row_sel1, col_sel1] == 1:            # ← 막힌 셀
-                print("경유점이 장애물!  FOV 선을 따라 재검색")
-
-                # 1) 먼저 선택된 시야각(u_sel) 방향으로 맵 안쪽 끝까지 OUTWARD 탐색
-                u_sel   = v_left/np.linalg.norm(v_left) if sel_side=="Left" else v_right/np.linalg.norm(v_right)
-                t_start = np.dot(F_sel - goal_world[:2], u_sel)
-                P_new, idx_new = find_free_on_ray(goal_world[:2], u_sel, t_start,
-                                                # search_outward=True,
-                                                binary_map=occ2d_eroded_dilated_inflated,
-                                                origin=origin, voxel_size=voxel_size,
-                                                map_shape=(nx, nz))
-                print('우우우우 전방', P_new)
-                # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
-                if P_new is None:
-                    u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
-                    _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
-                                            origin=origin, voxel_size=voxel_size,
-                                            map_shape=(nx, nz))
-                    P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
-                                                    search_outward=False,
-                                                    binary_map=occ2d_eroded_dilated_inflated,
-                                                    origin=origin, voxel_size=voxel_size,
-                                                    map_shape=(nx, nz))
-                    if P_new is not None:
-                        sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
-
-                # 3) 성공 시 경유점 갱신
-                if P_new is not None:
-                    F_sel2         = P_new
-                    row_sel2, col_sel2 = idx_new
-                    d_enemy_sel2   = np.linalg.norm(goal_world[:2] - F_sel2)
-                    print(f"[재검색 성공] 새 경유점 ({sel_side}) : "
-                        f"{F_sel2[0]:.2f}, {F_sel2[1]:.2f} m  (적 거리 {d_enemy_sel2:.2f} m)")
-                else:
-                    print("두 방향 모두에서 자유 셀을 찾지 못했습니다 → 경유점 사용 포기")
-                    
-            if "row_sel2" in locals() and row_sel2 is not None and "col_sel2" in locals() and col_sel2 is not None:
-                pass
-            else:
-                # (3) 거리 재계산·로그 # 근접문제 해결 후 True문제 없는 경우
-                d_enemy_sel1 = np.linalg.norm(goal_world[:2] - F_sel1)
-                print(f"[최소 접근거리 적용] 새 수선의 발 : ({F_sel1[0]:.3f}, {F_sel1[1]:.3f}) m")
-                print(f"적 전차 → 수선의 발 거리      : {d_enemy_sel1:.3f} m")
-                row_sel1, col_sel1 = world_to_index(F_sel1, origin, voxel_size)
-            
-            # if binary_map[row_sel1, col_sel1] == 1:            # ← 막힌 셀
-            #     print("경유점이 장애물!  FOV 선을 따라 재검색")
-
-            #     # 1) 먼저 선택된 시야각(u_sel) 방향으로 맵 안쪽 끝까지 OUTWARD 탐색
-            #     u_sel   = v_left/np.linalg.norm(v_left) if sel_side=="Left" else v_right/np.linalg.norm(v_right)
-            #     t_start = np.dot(F_sel - goal_world[:2], u_sel)
-            #     P_new, idx_new = find_free_on_ray(goal_world[:2], u_sel, t_start,
-            #                                     search_outward=True,
-            #                                     binary_map=binary_map,
-            #                                     origin=origin, voxel_size=voxel_size,
-            #                                     map_shape=map_shape)
-
-            #     # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
-            #     if P_new is None:
-            #         u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
-            #         _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
-            #                                 origin=origin, voxel_size=voxel_size,
-            #                                 map_shape=map_shape)
-            #         P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
-            #                                         search_outward=False,
-            #                                         binary_map=binary_map,
-            #                                         origin=origin, voxel_size=voxel_size,
-            #                                         map_shape=map_shape)
-            #         if P_new is not None:
-            #             sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
-            #     # 3) 성공 시 경유점 갱신
-            #     if P_new is not None:
-            #         F_sel         = P_new
-            #         row_sel3, col_sel3 = idx_new
-            #         d_enemy_sel   = np.linalg.norm(goal_world[:2] - F_sel)
-            #         print(f"[재검색 성공] 새 경유점 ({sel_side}) : "
-            #             f"{F_sel[0]:.2f}, {F_sel[1]:.2f} m  (적 거리 {d_enemy_sel:.2f} m)")
-            #     else:
-            #         print("두 방향 모두에서 자유 셀을 찾지 못했습니다 → 경유점 사용 포기")
-    
-    # 수선의 발이 최소 접근거리 밖에 있는 경우
-    else:
+        u_sel = h_g_v_left / np.linalg.norm(h_g_v_left) if sel_side == "Left" else h_g_v_right / np.linalg.norm(h_g_v_right) # world 좌표에어 적전차 -> 수선의 발 까지 유닛 벡터
         
-        if occ2d_eroded_dilated_inflated[r_sel, f_sel] == 1:            # ← 막힌 셀 우 전방
-            print('hhhhhhhhhhhh', r_sel, f_sel) # 우 전방
+        # world 좌표 상 최소 접근거리로 경유점 갱신
+        F_sel1 = goal_world[:2] + approach_min * u_sel
+
+        # 지도 밖으로 나갈 수 있으니 지도 안으로 clamp
+        F_sel1 = clamp_point_on_ray(
+            F_sel1, goal_world[:2], u_sel,
+            origin=origin, voxel_size=voxel_size, map_shape=(nx, nz)
+        )
+        r_sel1, f_sel1 = world_to_index(F_sel1, origin, voxel_size) # 수선의 발이 최소 접근거리 이내인 경우 지도 밖인지 판별하여 지도 안으로 보정
+        
+        if occ2d_filled[r_sel1, f_sel1] == 1:            # 수선의 발이 최소 접근거리 이내인 경우 지도 밖인지 판별하여 지도 안으로 보정, 장애물인 경우
             print("경유점이 장애물!  FOV 선을 따라 재검색")
 
-            # 1) 먼저 선택된 시야각(u_sel) 방향으로 맵 안쪽 끝까지 OUTWARD 탐색
-            u_sel   = v_left/np.linalg.norm(v_left) if sel_side=="Left" else v_right/np.linalg.norm(v_right)
+            # 선택된 시야각(u_sel), 적에게 가까운 점 우선 탐색
             t_start = np.dot(F_sel - goal_world[:2], u_sel)
             P_new, idx_new = find_free_on_ray(goal_world[:2], u_sel, t_start,
-                                            # search_outward=True,
-                                            binary_map=occ2d_eroded_dilated_inflated,
+                                            binary_map=occ2d_filled,
                                             origin=origin, voxel_size=voxel_size,
                                             map_shape=(nx, nz))
-            print('fnfnfnfn', P_new)
-            # 2) 실패하면 반대 시야각(u_opp)으로, 맵 끝→안쪽(INWARD) 탐색
+            # 실패하면 반대 시야각에서 적에게 가까운 점 우선 탐색
             if P_new is None:
-                print('실패함???')
-                u_opp = v_right/np.linalg.norm(v_right) if sel_side=="Left" else v_left/np.linalg.norm(v_left)
+                u_opp = h_g_v_right/np.linalg.norm(h_g_v_right) if sel_side=="Left" else h_g_v_left/np.linalg.norm(h_g_v_left)
                 _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
                                         origin=origin, voxel_size=voxel_size,
                                         map_shape=(nx, nz))
                 P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
                                                 search_outward=False,
-                                                binary_map=occ2d_eroded_dilated_inflated,
+                                                binary_map=occ2d_filled,
                                                 origin=origin, voxel_size=voxel_size,
                                                 map_shape=(nx, nz))
                 if P_new is not None:
                     sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
-            # 3) 성공 시 경유점 갱신
+
+            # 성공 시 경유점 갱신
+            if P_new is not None:
+                F_sel2         = P_new # 수선의 발, 최소 접근거리 내부면 밀어내기, 장애물인 경우 적에게 가까운 점으로 갱신
+                r_sel2, f_sel2 = idx_new
+                d_enemy_sel2   = np.linalg.norm(goal_world[:2] - F_sel2)
+                print(f"[재검색 성공] 새 경유점 ({sel_side}) : "
+                    f"{F_sel2[0]:.2f}, {F_sel2[1]:.2f} m  (적 거리 {d_enemy_sel2:.2f} m)")
+            else:
+                print("두 방향 모두에서 자유 셀을 찾지 못했습니다 → 경유점 사용 포기")
+    
+    # 수선의 발이 최소 접근거리 밖에 있는 경우
+    else:
+        
+        if occ2d_filled[r_sel, f_sel] == 1:            # ← 막힌 셀 우 전방
+            print("경유점이 장애물!  FOV 선을 따라 재검색")
+
+            # 1) 선택된 시야각(u_sel) 방향으로 적에게 가까운 점 탐색
+            u_sel   = h_g_v_left/np.linalg.norm(h_g_v_left) if sel_side=="Left" else h_g_v_right/np.linalg.norm(h_g_v_right)
+            t_start = np.dot(F_sel - goal_world[:2], u_sel)
+            P_new, idx_new = find_free_on_ray(goal_world[:2], u_sel, t_start,
+                                            binary_map=occ2d_filled,
+                                            origin=origin, voxel_size=voxel_size,
+                                            map_shape=(nx, nz))
+            # 2) 실패하면 반대 시야각(u_opp)으로 적과 가까운 점 탐색
+            if P_new is None:
+                u_opp = h_g_v_right/np.linalg.norm(h_g_v_right) if sel_side=="Left" else h_g_v_left/np.linalg.norm(h_g_v_left)
+                _, _, t_max = foot_to_ray(goal_world[:2], goal_world[:2], u_opp,
+                                        origin=origin, voxel_size=voxel_size,
+                                        map_shape=(nx, nz))
+                P_new, idx_new = find_free_on_ray(goal_world[:2], u_opp, t_max,
+                                                search_outward=False,
+                                                binary_map=occ2d_filled,
+                                                origin=origin, voxel_size=voxel_size,
+                                                map_shape=(nx, nz))
+                if P_new is not None:
+                    sel_side = "Right" if sel_side=="Left" else "Left"   # 방향 전환
+            
+            # 성공 시 경유점 갱신
+            # 수선의 발이 최소 접근범위 밖에 있으며 장애물인 경우 양방향 탐색 후 적에게 가까운 점 출력
             if P_new is not None:
                 F_sel3         = P_new
                 r_sel3, f_sel3   = idx_new  # idx_new 우, 전방
@@ -880,48 +840,41 @@ else:
 # ====================== 만들어진 경유점 정리 ======================
 # ── 경유점 인덱스(wp_idx) 확정 ────────────────────────────
 wp_idx = None
-if   "r_sel3" in locals() and r_sel3 is not None:   # 재검색 성공
+if   "r_sel3" in locals() and r_sel3 is not None:   # 수선의 발이 최소 접근거리 밖, 장애물인 경우 적에게 가까운 점
     wp_idx = (r_sel3, f_sel3) # 우 전방
-elif "row_sel2" in locals() and row_sel2 is not None:   # 최소거리 적용
-    wp_idx = (row_sel2, col_sel2)
-elif "row_sel1" in locals() and row_sel1 is not None:   # 접근만 적용
-    wp_idx = (row_sel1, col_sel1)
+elif "r_sel2" in locals() and r_sel2 is not None:   # 수선의 발이 최소 접근거리 내부인 경우 밀어내기, 장애물인 경우 적에게 가까운 점으로 갱신
+    wp_idx = (r_sel2, f_sel2)
+elif "r_sel1" in locals() and r_sel1 is not None:   # 수선의 발이 최소 접근거리 이내인 경우 지도 밖인지 판별하여 지도 안으로 보정
+    wp_idx = (r_sel1, f_sel1)
 elif "r_sel"  in locals() and r_sel  is not None:   # 최초 수선의 발
     wp_idx = (r_sel,  f_sel)
 
-# ====================== 2D A* 알고리즘 2회 실시 ======================
+# ====================== 2D A* 알고리즘 3회 실시 ======================
+path_s2w = []
+path_w2r = []
+path_r2g = []
 if wp_idx is not None:        # 경유점이 있을 때
-    path_s2w = astar_2d(occ2d_eroded_dilated_inflated, start2d, (wp_idx[0], wp_idx[1])) # 우 전방
-    print('ssssssss', start2d)
-    print('RRRRR FFFFF', wp_idx[0], wp_idx[1])
-    print('11111111', len(path_s2w))
+    path_s2w = astar_2d(occ2d_filled, start2d, (wp_idx[0], wp_idx[1])) # 우 전방
+    # wp_world = index_to_world((wp_idx[0], wp_idx[1]), origin, voxel_size)
     
-    wp_world = index_to_world((wp_idx[0], wp_idx[1]), origin, voxel_size)
-    print('경유점 좌표', (wp_world[0], wp_world[1]))
+    # 적 후방 잡기 위해 최소 접근거리 내 적 전방 기준 +- 150도 점 2개 지정하여 접근
     wp_ring_w, wp_ring_idx = waypoint_on_approach_ring(
         O_xy       = goal_world[:2],
         heading    = h_g,
         radius     = approach_min,          # 50 m
-        binary_map = occ2d_eroded_dilated_inflated,
+        binary_map = occ2d_filled,
         origin     = origin,
         voxel_size = voxel_size,
         map_shape  = (nx, nz),
         prefer_xy  = (wp_idx[0], wp_idx[1]))       # 경유점 우, 전방
     
-    print('왜 이러냐', wp_ring_idx[0], wp_ring_idx[1])
-    path_w2r = astar_2d(occ2d_eroded_dilated_inflated, (wp_idx[0], wp_idx[1]),  (wp_ring_idx[0], wp_ring_idx[1]))
+    path_w2r = astar_2d(occ2d_filled, (wp_idx[0], wp_idx[1]),  (wp_ring_idx[0], wp_ring_idx[1]))
     
-    path_r2g = astar_2d(occ2d_eroded_dilated_inflated, (wp_ring_idx[0], wp_ring_idx[1]),  goal2d)
-    print('22222222', len(path_r2g))
-    # ♦ 두 경로를 합칠 때 중복되는 웨이포인트 하나 제거
-    # path_full = path_s2w[:-1] + path_w2g
-    # print('333333', len(path_full))
-    # print(path_full)
+    path_r2g = astar_2d(occ2d_filled, (wp_ring_idx[0], wp_ring_idx[1]),  goal2d)
+
+    path_full2 = path_s2w[:-1] + path_w2r[:-1] + path_r2g[:-1]
 else:                          # 경유점이 없으면 한 번만
-    print('경유점 없냐ㅑㅑ')
-    path_s2w = []
-    path_w2g = []
-    path_full = astar_2d(occ2d_eroded_dilated_inflated, start2d, goal2d)
+    path_full = astar_2d(occ2d_filled, start2d, goal2d)
     
 
 # ====================== 2D A* 알고리즘 ======================
@@ -931,34 +884,46 @@ else:                          # 경유점이 없으면 한 번만
 # path2d = astar_2d(binary_map, start2d, goal2d)           # 장애물 마진 넣어서 A*
 # ed_time = time.perf_counter()
 # print(f'A* 소요시간: {ed_time - st_time:.6f}초')
-# if path2d:
-#     print('2D 경로 찾음')
-#     path_2d_arr = np.array(path2d, dtype=int)  # shape = (N, 2)
+if path_s2w or path_w2r or path_r2g or path_full:
+    print('2D 경로 찾음')
+    try:
+        
+        path_2d_arr = np.array(path_full2, dtype=int)  # shape = (N, 2)
+        print('hi', path_2d_arr)
+    except:
+        path_2d_arr = np.array(path_full, dtype=int)  # shape = (N, 2)
+        print('go', path_2d_arr)
+        
+    k0_col = np.full((path_2d_arr.shape[0], 1), 0, dtype=int)
+    for idx in range(len(path_2d_arr)):
+        x1, z1 = path_2d_arr[idx]
+        idxs = np.where(ogm[x1, z1, :])[0]
+        if idxs.size:                       # True가 하나 이상 존재
+            k0_col[idx] = idxs.max() + k0
+        else:                               # True가 없을 때의 처리
+            k0_col[idx] = k0_col[idx-1]         # 없는 경우 1개 이전 값을 활용
+        
+        # k0_col[idx] = np.max(np.where(ogm[x1, z1, :])[0]) + k0
+    path_arr_3d = np.hstack((path_2d_arr, k0_col))
     
-    # k0_col = np.full((path_2d_arr.shape[0], 1), 0, dtype=int)
-    # for idx in range(len(path_2d_arr)):
-    #     x1, z1 = path_2d_arr[idx]
-    #     k0_col[idx] = np.max(np.where(ogm[x1, z1, :])[0]) + k0
-    # path_arr_3d = np.hstack((path_2d_arr, k0_col))
-    
-#     path_world_3d = []                                                      # path_arr_3d를 월드 좌표로 변환
-#     for idx in path_arr_3d:
-#         i, k, j = idx
-#         # 셀의 중앙 좌표 = origin + (index + 0.5)*voxel_size
-#         x = origin[0] + (i) * voxel_size
-#         z = origin[1] + (k) * voxel_size
-#         y = origin[2] + (j + 0.5) * voxel_size
-#         path_world_3d.append((x, z, y))
-#     print("3차원공간의 3D 경로 인덱스:", path_arr_3d)
-# else:
-#     print("2D에서 경로를 찾지 못했습니다.")
+    path_world_3d = []                                                      # path_arr_3d를 월드 좌표로 변환
+    for idx in path_arr_3d:
+        i, k, j = idx
+        # 셀의 중앙 좌표 = origin + (index + 0.5)*voxel_size
+        x = origin[0] + (i) * voxel_size
+        z = origin[1] + (k) * voxel_size
+        y = origin[2] + (j + 0.5) * voxel_size
+        path_world_3d.append((x, z, y))
+    print("3차원공간의 3D 경로 인덱스:", path_arr_3d)
+else:
+    print("2D에서 경로를 찾지 못했습니다.")
     
 # ====================== 시각화 준비 ======================
 # ─── 2) A* · 시각화용 인덱스 변환 ───
 cells_hs    = [world_to_index(p, origin, voxel_size) for p in hs_world]
 cells_hg    = [world_to_index(p, origin, voxel_size) for p in hg_world]
-left_cells  = [world_to_index(p, origin, voxel_size) for p in left_world]
-right_cells = [world_to_index(p, origin, voxel_size) for p in right_world]
+left_cells  = [world_to_index(p, origin, voxel_size) for p in h_g_v_left_ray]
+right_cells = [world_to_index(p, origin, voxel_size) for p in h_g_v_right_ray]
 
 # 적전차 좌우 시야각 시각화 위에 변환
 left_xs  = [col for row, col in left_cells]                                                         # 시각화 위해 "우" 좌표 따기 
@@ -978,15 +943,15 @@ hg_zs = [row for row, col in cells_hg]
 
 
 plt.figure(figsize=(6, 6))
-plt.imshow(occ2d_eroded_dilated_inflated.T,     # 전방(y) 축이 위로 오도록 전치
+plt.imshow(occ2d_filled.T,     # 전방(y) 축이 위로 오도록 전치
         origin='lower',                         # 원점이 왼쪽 아래
         cmap='gray_r')                          # 0→흰색(free), 1→검은색(occupied)
 plt.colorbar(label='Occupancy')
 
 # 경유점 구하기 위해 적 시야각 표현
 
-plt.plot(hs_zs, hs_xs, linewidth=2, color='cyan',   label='Heading h_s (10 m)')
-plt.plot(hg_zs, hg_xs,  linewidth=2, color='yellow', label='Heading h_g (10 m)')
+plt.plot(hs_zs, hs_xs, linewidth=2, color='cyan',   label='Heading h_s')
+plt.plot(hg_zs, hg_xs,  linewidth=2, color='yellow', label='Heading h_g')
 
 plt.scatter(left_zs, left_xs,   s=1, c='lime',    marker='.', label='Left FOV boundary')
 plt.scatter(right_zs, right_xs, s=1, c='magenta', marker='.', label='Right FOV boundary')
@@ -1003,19 +968,24 @@ circle = plt.Circle((row_c, col_c ),               # 뒤집어서 시각화
 plt.gca().add_patch(circle)      # 또는 ax.add_patch(circle)
 
 # 맵 내부의 최초 경유점(수선의 발)
-if "col_sel" in locals() and "row_sel" in locals() and f_sel is not None and r_sel is not None:
-    plt.scatter(f_sel, r_sel, s=40, c='gray', marker='X',
-                label=f'{sel_side} foot (clamped)')
-
-# 최소 접근 거래 내부로 찍힌 경우 최소 접근거리로 경유점 재설정 시각화
-if "col_sel2" in locals() and "row_sel2" in locals() and col_sel2 is not None and row_sel2 is not None:
-    plt.scatter(col_sel2, row_sel2, s=40, c='yellow', marker='X',
+if "r_sel" in locals() and "f_sel" in locals() and f_sel is not None and r_sel is not None:
+    plt.scatter(r_sel, f_sel, s=40, c='gray', marker='X',
                 label=f'{sel_side} foot (clamped)')
     
-# 찾은 경유점이 갈 수 없을 때 시야각선 따라서 재탐색 시각화
-if "col_sel3" in locals() and "row_sel3" in locals() and r_sel3 is not None and f_sel3 is not None:
-    plt.scatter(f_sel3, r_sel3, s=40, c='pink', marker='X', # 뒤집어서 출력
-                label=f'{sel_side} foot (clamped)')
+# 최초 경유점(수선의 발)이 최소 접근거리 내부에 있는 경우 밖으로 밀어내기, 맵 밖인 경우 안으로 당기기
+if "r_sel1" in locals() and "f_sel1" in locals() and f_sel1 is not None and r_sel1 is not None:
+    plt.scatter(r_sel1, f_sel1, s=400, c='olive', marker='X',
+                label=f'{sel_side} foot -> app_min (clamped)')
+    
+# 수선의 발이 최소 접근거리 내부면 밀어내기, 장애물인 경우 적에게 가까운 점으로 갱신
+if "f_sel2" in locals() and "r_sel2" in locals() and f_sel2 is not None and r_sel2 is not None:
+    plt.scatter(r_sel2, f_sel2, s=400, c='purple', marker='X',
+                label=f'{sel_side} foot -> app_min -> obstacle -> near  (clamped)')
+    
+# 수선의 발이 최소 접근범위 밖에 있으며 장애물인 경우 양방향 탐색 후 적에게 가까운 점 출력
+if "r_sel3" in locals() and "f_sel3" in locals() and r_sel3 is not None and f_sel3 is not None:
+    plt.scatter(r_sel3, f_sel3, s=400, c='pink', marker='X', # 뒤집어서 출력
+                label=f'{sel_side} foot out min -> obstacle -> close (clamped)')
 
 # path2d 궤적 추가
 # xs, zs = zip(*path2d)  
@@ -1028,7 +998,7 @@ if path_s2w:                                  # 시작 → 웨이포인트
     xs1, zs1 = zip(*path_s2w) # 우 전방
     plt.plot(xs1, zs1, color='orange', lw=2, label='Start → WP') 
     
-if path_s2w:                                  # 웨이포인트 → 링포인트
+if path_w2r:                                  # 웨이포인트 → 링포인트
     xs1, zs1 = zip(*path_w2r) # 우 전방
     plt.plot(xs1, zs1, color='green', lw=2, label='Start → WP') 
     
@@ -1036,9 +1006,9 @@ if path_r2g:                                  # 링포인트 → 목표
     xs2, zs2 = zip(*path_r2g) # 우 전방
     plt.plot(xs2, zs2, color='blue',   lw=2, label='WP → Goal') 
 
-# if not path_s2w and not path_w2g:             # 경유점 없이 한 번에
-#     xs, zs = zip(*path_full)  # 우 전방
-#     plt.plot(xs, zs, color='orange', lw=2, label='Start → Goal') 
+if not path_s2w and not path_w2r and not path_r2g:             # 경유점 없이 한 번에
+    xs, zs = zip(*path_full)  # 우 전방
+    plt.plot(xs, zs, color='orange', lw=2, label='Start → Goal') 
     
 # 웨이포인트 마커
 if wp_idx is not None:
@@ -1056,55 +1026,55 @@ plt.show()
 
 
 # 3d맵 위에 2d path 그리기
-# path_mask = np.zeros_like(ogm, dtype=np.uint8)
-# for (i, j) in path_2d_arr:
-#     path_mask[i, j, np.where(ogm[i, j, :])[0] + k0] = 1
-# sp_mask = np.zeros_like(ogm, dtype=np.uint8)                                                        # 시작점
-# gp_mask = np.zeros_like(ogm, dtype=np.uint8)                                                        # 도착점
-# sp_mask[(start_idx[0], start_idx[1], np.where(ogm[start_idx[0], start_idx[1], :])[0] + k0)] = 1
-# gp_mask[(goal_idx[0], goal_idx[1], np.where(ogm[goal_idx[0], goal_idx[1], :])[0] + k0)]  = 1
+path_mask = np.zeros_like(ogm, dtype=np.uint8)
+for (i, j) in path_2d_arr:
+    path_mask[i, j, np.where(ogm[i, j, :])[0] + k0] = 1
+sp_mask = np.zeros_like(ogm, dtype=np.uint8)                                                        # 시작점
+gp_mask = np.zeros_like(ogm, dtype=np.uint8)                                                        # 도착점
+sp_mask[(start_idx[0], start_idx[1], np.where(ogm[start_idx[0], start_idx[1], :])[0] + k0)] = 1
+gp_mask[(goal_idx[0], goal_idx[1], np.where(ogm[goal_idx[0], goal_idx[1], :])[0] + k0)]  = 1
 
-# grid.cell_data["path"] = path_mask.ravel(order="F")
+grid.cell_data["path"] = path_mask.ravel(order="F")
 
-# grid.cell_data["sp"]   = sp_mask.ravel(order="F")
-# grid.cell_data["gp"]   = gp_mask.ravel(order="F")
+grid.cell_data["sp"]   = sp_mask.ravel(order="F")
+grid.cell_data["gp"]   = gp_mask.ravel(order="F")
 
-# path_voxels    = grid.threshold(0.5, scalars="path")
-# path_voxels_sp = grid.threshold(0.5, scalars="sp")
-# path_voxels_gp = grid.threshold(0.5, scalars="gp")
+path_voxels    = grid.threshold(0.5, scalars="path")
+path_voxels_sp = grid.threshold(0.5, scalars="sp")
+path_voxels_gp = grid.threshold(0.5, scalars="gp")
 
-# plotter = pv.Plotter()
-# plotter.add_mesh(voxels,        color="lightgray", opacity=0.6, show_edges=False)
-# plotter.add_mesh(path_voxels,   color="yellow",     opacity=1.0,   show_edges=False)
-# plotter.add_mesh(path_voxels_sp, color="blue",     opacity=1.0,   show_edges=False)
-# plotter.add_mesh(path_voxels_gp, color="red",      opacity=1.0,   show_edges=False)
-# plotter.show_grid(
-#     xtitle="X (m)",
-#     ytitle="Z (m)",
-#     ztitle="Y (m)",
-#     show_xaxis=True,
-#     show_yaxis=True,
-#     show_zaxis=True,
-#     show_xlabels=True,
-#     show_ylabels=True,
-#     show_zlabels=True
-# )
-# plotter.show(title="3D Occupancy + 2D Path (Start/Goal)")
-# plotter.close()
+plotter = pv.Plotter()
+plotter.add_mesh(voxels,        color="lightgray", opacity=0.6, show_edges=False)
+plotter.add_mesh(path_voxels,   color="green",     opacity=1.0,   show_edges=False)
+plotter.add_mesh(path_voxels_sp, color="blue",     opacity=1.0,   show_edges=False)
+plotter.add_mesh(path_voxels_gp, color="red",      opacity=1.0,   show_edges=False)
+plotter.show_grid(
+    xtitle="X (m)",
+    ytitle="Z (m)",
+    ztitle="Y (m)",
+    show_xaxis=True,
+    show_yaxis=True,
+    show_zaxis=True,
+    show_xlabels=True,
+    show_ylabels=True,
+    show_zlabels=True
+)
+plotter.show(title="3D Occupancy + 2D Path (Start/Goal)")
+plotter.close()
 
 
 
 
 # ====================== 3d Linear Interpolation ======================
-# print(f"Before Linear Interpolation 3d way point 갯수: {len(path_arr_3d)} 개")
-# plot_3d_data(path_world_3d) # before interpolation 시각화
-# st_time = time.perf_counter()
-# interpolated_3d_path_arr = resample_by_arc_length_3d(np.asarray(path_world_3d), spacing = 0.5)
-# ed_time = time.perf_counter()
-# print(f'3d Linear Interpolation 소요시간: {ed_time - st_time:.6f}초')
-# print(f"After Linear Interpolation way point 갯수: {len(interpolated_3d_path_arr)} 개")
-# plot_3d_data(interpolated_3d_path_arr) # after interpolation 시각화
-# print(f"After Linear Interpolation way point 갯수: {len(interpolated_3d_path_arr)} 개")
+print(f"Before Linear Interpolation 3d way point 갯수: {len(path_arr_3d)} 개")
+plot_3d_data(path_world_3d) # before interpolation 시각화
+st_time = time.perf_counter()
+interpolated_3d_path_arr = resample_by_arc_length_3d(np.asarray(path_world_3d), spacing = 0.5)
+ed_time = time.perf_counter()
+print(f'3d Linear Interpolation 소요시간: {ed_time - st_time:.6f}초')
+print(f"After Linear Interpolation way point 갯수: {len(interpolated_3d_path_arr)} 개")
+plot_3d_data(interpolated_3d_path_arr) # after interpolation 시각화
+print(f"After Linear Interpolation way point 갯수: {len(interpolated_3d_path_arr)} 개")
 
 
 
